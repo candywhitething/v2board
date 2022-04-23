@@ -2,284 +2,557 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UserFetch;
 use App\Http\Requests\Admin\UserGenerate;
 use App\Http\Requests\Admin\UserSendMail;
 use App\Http\Requests\Admin\UserUpdate;
 use App\Jobs\SendEmailJob;
-use App\Services\UserService;
-use App\Utils\Helper;
-use Illuminate\Http\Request;
-use App\Http\Controllers\Controller;
-use App\Models\User;
 use App\Models\Plan;
+use App\Models\User;
+use App\Utils\Helper;
+use Exception;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class UserController extends Controller
 {
+    /**
+     * reset secret
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
     public function resetSecret(Request $request)
     {
-        $user = User::find($request->input('id'));
-        if (!$user) abort(500, '用户不存在');
-        $user->token = Helper::guid();
-        $user->uuid = Helper::guid(true);
+        $reqId = $request->input("id");
+        $user = User::find($reqId);
+        /**
+         * @var User $user
+         */
+        if ($user === null) {
+            abort(500, '用户不存在');
+        }
+
+        $user->setAttribute(User::FIELD_TOKEN, Helper::guid());
+        $user->setAttribute(User::FIELD_UUID, Helper::guid(true));
         return response([
             'data' => $user->save()
         ]);
     }
 
-    private function filter(Request $request, $builder)
-    {
-        $filters = $request->input('filter');
-        if ($filters) {
-            foreach ($filters as $k => $filter) {
-                if ($filter['condition'] === '模糊') {
-                    $filter['condition'] = 'like';
-                    $filter['value'] = "%{$filter['value']}%";
-                }
-                if ($filter['key'] === 'd' || $filter['key'] === 'transfer_enable') {
-                    $filter['value'] = $filter['value'] * 1073741824;
-                }
-                if ($filter['key'] === 'invite_by_email') {
-                    $user = User::where('email', $filter['condition'], $filter['value'])->first();
-                    $inviteUserId = isset($user->id) ? $user->id : 0;
-                    $builder->where('invite_user_id', $inviteUserId);
-                    unset($filters[$k]);
-                    continue;
-                }
-                $builder->where($filter['key'], $filter['condition'], $filter['value']);
-            }
-        }
-    }
-
+    /**
+     * fetch
+     *
+     * @param UserFetch $request
+     * @return Application|ResponseFactory|Response
+     */
     public function fetch(UserFetch $request)
     {
-        $current = $request->input('current') ? $request->input('current') : 1;
-        $pageSize = $request->input('pageSize') >= 10 ? $request->input('pageSize') : 10;
-        $sortType = in_array($request->input('sort_type'), ['ASC', 'DESC']) ? $request->input('sort_type') : 'DESC';
-        $sort = $request->input('sort') ? $request->input('sort') : 'created_at';
-        $userModel = User::select(
-            DB::raw('*'),
-            DB::raw('(u+d) as total_used')
-        )
-            ->orderBy($sort, $sortType);
-        $this->filter($request, $userModel);
+        $reqCurrent = $request->input('current') ? $request->input('current') : 1;
+        $reqPageSize = $request->input('pageSize') >= 10 ? $request->input('pageSize') : 10;
+        $reqSortType = in_array($request->input('sort_type'), ["ASC", "DESC"]) ? $request->input('sort_type') : "DESC";
+        $reqSort = $request->input('sort') ? $request->input('sort') : User::FIELD_ID;
+        $userModel = User::orderBy($reqSort, $reqSortType);
+        $this->_filter($request, $userModel);
         $total = $userModel->count();
-        $res = $userModel->forPage($current, $pageSize)
-            ->get();
-        $plan = Plan::get();
-        for ($i = 0; $i < count($res); $i++) {
-            for ($k = 0; $k < count($plan); $k++) {
-                if ($plan[$k]['id'] == $res[$i]['plan_id']) {
-                    $res[$i]['plan_name'] = $plan[$k]['name'];
+        $users = $userModel->forPage($reqCurrent, $reqPageSize)->get();
+        $showColumns = collect(Config::get('admin'))->get('user') ? collect(Config::get('admin'))->get('user')['list_show_columns'] : [];
+        $planIds = $users->filter(function ($user) {
+            /**
+             * @var User $user
+             */
+            return $user->getAttribute(User::FIELD_PLAN_ID) > 0;
+        })->map(function ($user) {
+            return $user->getAttribute(User::FIELD_PLAN_ID);
+        })->values()->all();
+
+        $plans = Plan::whereIn(Plan::FIELD_ID, $planIds)->get();
+        foreach ($users as $user) {
+            /**
+             * @var User $user
+             */
+            if (in_array('invite_total', $showColumns)) {
+                $inviteTotal = $user->countInvitedUsers();
+                $user->setAttribute("invite_total", $inviteTotal);
+            }
+
+            if (in_array('order_amount_total', $showColumns)) {
+                $orderAmountTotal = $user->countValidOrdersTotalAmount();
+                $user->setAttribute('order_amount_total', $orderAmountTotal);
+            }
+
+            foreach ($plans as $plan) {
+                /**
+                 * @var Plan $plan
+                 */
+                $planId = $plan->getKey();
+                $userPlanId = $user->getAttribute(User::FIELD_PLAN_ID);
+                if ($planId == $userPlanId) {
+                    $user->setAttribute("plan_name", $plan->getAttribute(Plan::FIELD_NAME));
+                    $user->setAttribute(Plan::FIELD_TRANSFER_ENABLE_VALUE, $plan->getAttributeValue(Plan::FIELD_TRANSFER_ENABLE_VALUE));
                 }
             }
-            $res[$i]['subscribe_url'] = Helper::getSubscribeHost() . '/api/v1/client/subscribe?token=' . $res[$i]['token'];
+
+            $subscribeUrl = Helper::getSubscribeHost() . '/api/v1/client/subscribe?token=' . $user->getAttribute(User::FIELD_TOKEN);
+            $user->setAttribute("subscribe_url", $subscribeUrl);
         }
         return response([
-            'data' => $res,
+            'data' => $users,
             'total' => $total
         ]);
     }
 
-    public function getUserInfoById(Request $request)
+    /**
+     * _filter
+     *
+     * @param Request $request
+     * @param mixed $builder
+     */
+    private function _filter(Request $request, Builder $builder)
     {
-        if (empty($request->input('id'))) {
+        $reqFilter = (array)$request->input('filter');
+        foreach ($reqFilter as $filter) {
+            if ($filter['key'] === 'invite_by_email') {
+                /**
+                 * @var User $user
+                 */
+                $user = User::findByEmail($filter['value']);
+                if ($user === null) {
+                    continue;
+                }
+                $builder->where(User::FIELD_INVITE_USER_ID, $user->getKey());
+                continue;
+            }
+
+            if ($filter['condition'] === 'range') {
+                $rangeValue = explode(',', $filter['value']);
+                $minValue = (int)$rangeValue[0];
+                $maxValue = (int)$rangeValue[1];
+                if ($filter['key'] === User::FIELD_D || $filter['key'] === User::FIELD_U) {
+                    $minValue = $minValue * 1073741824;
+                    $maxValue = $maxValue * 1073741824;
+                }
+                if ($minValue === $maxValue) {
+                    $builder->where($filter['key'], '>=', $minValue);
+                } else {
+                    $builder->where($filter['key'], '>=', $minValue)->where($filter['key'], '<=', $maxValue);
+                }
+                continue;
+            }
+
+            //兼容
+            if ($filter['condition'] === '模糊' || $filter['condition'] === 'like') {
+                $filter['condition'] = 'like';
+                $filter['value'] = "%{$filter['value']}%";
+            }
+
+            $builder->where($filter['key'], $filter['condition'], $filter['value']);
+        }
+    }
+
+    /**
+     * userInfo
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
+    public function userInfo(Request $request)
+    {
+        $reqId = (int)$request->input('id');
+        if ($reqId <= 0) {
             abort(500, '参数错误');
         }
-        $user = User::find($request->input('id'));
-        if ($user->invite_user_id) {
-            $user['invite_user'] = User::find($user->invite_user_id);
+
+        /**
+         * @var User $user
+         */
+        $user = User::find($reqId);
+        if ($user === null) {
+            abort(500, '用户不存在');
         }
+        $inviteUserId = $user->getAttribute(User::FIELD_INVITE_USER_ID);
+        if ($inviteUserId > 0) {
+            $user["invite_user"] = User::find($inviteUserId);
+        }
+
         return response([
             'data' => $user
         ]);
     }
 
+    /**
+     * update
+     *
+     * @param UserUpdate $request
+     * @return Application|ResponseFactory|Response
+     */
     public function update(UserUpdate $request)
     {
-        $params = $request->validated();
-        $user = User::find($request->input('id'));
+        $reqId = $request->input("id");
+        $reqEmail = $request->input("email");
+        $reqPassword = (string)$request->input("password");
+        $reqPlanId = (int)$request->input("plan_id");
+        $reqOrderDay = $request->input("order_day");
+        $reqExpiredAt = $request->input("expired_at");
+        $reqBanned = $request->input("banned");
+        $reqCommissionRate = $request->input("commission_rate");
+        $reqDiscount = $request->input("discount");
+        $reqIsAdmin = $request->input("is_admin");
+        $reqIsStaff = $request->input("is_staff");
+        $reqU = $request->input('u');
+        $reqD = $request->input('d');
+        $reqBalance = $request->input('balance');
+        $reqCommissionType = $request->input('commission_type');
+        $reqCommissionBalance = $request->input('commission_balance');
+        $reqRemarks = $request->input("remarks");
+        $reqInviteUserEmail = $request->input('invite_user_email');
+        $reqInviteUserID = $request->input('invite_user_id');
+
+
+        /**
+         * @var User $user
+         */
+        $user = User::find($reqId);
         if (!$user) {
             abort(500, '用户不存在');
         }
-        if (User::where('email', $params['email'])->first() && $user->email !== $params['email']) {
-            abort(500, '邮箱已被使用');
-        }
-        if (isset($params['password'])) {
-            $params['password'] = password_hash($params['password'], PASSWORD_DEFAULT);
-            $params['password_algo'] = NULL;
-        } else {
-            unset($params['password']);
-        }
-        if (isset($params['plan_id'])) {
-            $plan = Plan::find($params['plan_id']);
-            if (!$plan) {
-                abort(500, '订阅计划不存在');
+
+        $userEmail = $user->getAttribute(User::FIELD_EMAIL);
+        if ($reqEmail) {
+            if (User::findByEmail($reqEmail) && $userEmail !== $reqEmail) {
+                abort(500, '邮箱已被使用');
             }
-            $params['group_id'] = $plan->group_id;
-        }
-        if ($request->input('invite_user_email')) {
-            $inviteUser = User::where('email', $request->input('invite_user_email'))->first();
-            if ($inviteUser) {
-                $params['invite_user_id'] = $inviteUser->id;
-            }
-        } else {
-            $params['invite_user_id'] = null;
+            $user->setAttribute(User::FIELD_EMAIL, $reqEmail);
         }
 
-        try {
-            $user->update($params);
-        } catch (\Exception $e) {
+        if ($reqPassword) {
+            $user->setAttribute(User::FIELD_PASSWORD, password_hash($reqPassword, PASSWORD_DEFAULT));
+            $user->setAttribute(User::FIELD_PASSWORD_ALGO, null);
+        }
+
+        if ($reqPlanId > 0) {
+            /**
+             * @var Plan $plan
+             */
+            $plan = Plan::find($reqPlanId);
+            if ($plan === null) {
+                abort(500, '订阅计划不存在');
+            }
+            $user->setAttribute(User::FIELD_PLAN_ID, $reqPlanId);
+        } else {
+            $user->setAttribute(User::FIELD_PLAN_ID, 0);
+        }
+
+        $user->setAttribute(User::FIELD_EXPIRED_AT, $reqExpiredAt);
+        $user->setAttribute(User::FIELD_ORDER_DAY, $reqOrderDay);
+
+        if ($reqBanned !== null) {
+            $user->setAttribute(User::FIELD_BANNED, $reqBanned);
+        }
+
+        if ($reqCommissionRate !== null) {
+            $user->setAttribute(User::FIELD_COMMISSION_TYPE, $reqCommissionType);
+        }
+
+        $user->setAttribute(User::FIELD_DISCOUNT, $reqDiscount);
+        $user->setAttribute(User::FIELD_COMMISSION_RATE, $reqCommissionRate);
+
+
+        if ($reqIsAdmin !== null) {
+            $user->setAttribute(User::FIELD_IS_ADMIN, $reqIsAdmin);
+        }
+
+        if ($reqIsStaff !== null) {
+            $user->setAttribute(User::FIELD_IS_STAFF, $reqIsStaff);
+        }
+
+        if ($reqU !== null) {
+            $user->setAttribute(User::FIELD_U, $reqU);
+        }
+
+        if ($reqD !== null) {
+            $user->setAttribute(User::FIELD_D, $reqD);
+        }
+
+        if ($reqBalance !== null) {
+            $user->setAttribute(User::FIELD_BALANCE, $reqBalance);
+        }
+
+        if ($reqCommissionBalance !== null) {
+            $user->setAttribute(User::FIELD_COMMISSION_BALANCE, $reqCommissionBalance);
+        }
+
+        $user->setAttribute(User::FIELD_REMARKS, $reqRemarks);
+
+
+        // 保留Email但不使用
+        if ($reqInviteUserEmail) {
+            /**
+             * @var User $inviteUser
+             */
+            $inviteUser = User::findByEmail($reqInviteUserEmail);
+            if ($inviteUser !== null) {
+                $user->setAttribute(User::FIELD_INVITE_USER_ID, $inviteUser->getKey());
+            } else {
+                $user->setAttribute(User::FIELD_INVITE_USER_ID, 0);
+            }
+        }
+
+        if ($reqInviteUserID) {
+            /**
+             * @var User $inviteUser
+             */
+            $inviteUser = User::find($reqInviteUserID);
+            if ($inviteUser !== null) {
+                $user->setAttribute(User::FIELD_INVITE_USER_ID, $inviteUser->getKey());
+            } else {
+                $user->setAttribute(User::FIELD_INVITE_USER_ID, 0);
+            }
+        }
+
+        if (!$user->save()) {
             abort(500, '保存失败');
+
         }
         return response([
             'data' => true
         ]);
     }
 
+    /**
+     * dumpCSV
+     *
+     * @param Request $request
+     *
+     * @return void
+     */
     public function dumpCSV(Request $request)
     {
-        $userModel = User::orderBy('id', 'asc');
-        $this->filter($request, $userModel);
-        $res = $userModel->get();
-        $plan = Plan::get();
-        for ($i = 0; $i < count($res); $i++) {
-            for ($k = 0; $k < count($plan); $k++) {
-                if ($plan[$k]['id'] == $res[$i]['plan_id']) {
-                    $res[$i]['plan_name'] = $plan[$k]['name'];
-                }
-            }
-        }
+        $userModel = User::orderBy(User::FIELD_ID);
+        $this->_filter($request, $userModel);
+        $users = $userModel->get();
+        $planIds = $users->filter(function ($user) {
+            /**
+             * @var User $user
+             */
+            return $user->getAttribute(User::FIELD_PLAN_ID) > 0;
+        })->map(function ($user) {
+            return $user->getAttribute(User::FIELD_PLAN_ID);
+        })->values()->all();
+
+        $plans = Plan::whereIn(Plan::FIELD_ID, $planIds)->get();
+
 
         $data = "邮箱,余额,推广佣金,总流量,剩余流量,套餐到期时间,订阅计划,订阅地址\r\n";
         $baseUrl = config('v2board.subscribe_url', config('v2board.app_url', env('APP_URL')));
-        foreach($res as $user) {
-            $expireDate = $user['expired_at'] === NULL ? '长期有效' : date('Y-m-d H:i:s', $user['expired_at']);
-            $balance = $user['balance'] / 100;
-            $commissionBalance = $user['commission_balance'] / 100;
-            $transferEnable = $user['transfer_enable'] ? $user['transfer_enable'] / 1073741824 : 0;
-            $notUseFlow = (($user['transfer_enable'] - ($user['u'] + $user['d'])) / 1073741824) ?? 0;
+        foreach ($users as $user) {
+            $expireDate = $user->getAttribute(User::FIELD_EXPIRED_AT) === NULL ? '长期有效' :
+                date('Y-m-d H:i:s', $user->getAttribute(User::FIELD_EXPIRED_AT));
+            $balance = $user->getAttribute(User::FIELD_BALANCE) / 100;
+            $commissionBalance = $user->getAttribute(User::FIELD_COMMISSION_BALANCE) / 100;
+            $transferEnable = '-';
+            $notUseFlow = '-';
+
+            foreach ($plans as $plan) {
+                /**
+                 * @var Plan $plan
+                 */
+                $planId = $plan->getKey();
+                $userPlanId = $user->getAttribute(User::FIELD_PLAN_ID);
+                if ($planId === $userPlanId) {
+                    $user->setAttribute("plan_name", $plan->getAttribute(Plan::FIELD_NAME));
+                    $transferEnable = $plan->getAttribute(Plan::FIELD_TRANSFER_ENABLE_VALUE) ?
+                        $plan->getAttribute(Plan::FIELD_TRANSFER_ENABLE_VALUE) / 1073741824 : 0;
+                    $notUseFlow = (($plan->getAttribute(Plan::FIELD_TRANSFER_ENABLE_VALUE) -
+                                ($user->getAttribute(User::FIELD_U) + $user->getAttribute(User::FIELD_D))) / 1073741824) ?? 0;
+                    $transferEnable = number_format($transferEnable, 2);
+                    $notUseFlow = number_format($notUseFlow, 2);
+                }
+            }
+
             $planName = $user['plan_name'] ?? '无订阅';
-            $subscribeUrl = $baseUrl . '/api/v1/client/subscribe?token=' . $user['token'];
-            $data .= "{$user['email']},{$balance},{$commissionBalance},{$transferEnable},{$notUseFlow},{$expireDate},{$planName},{$subscribeUrl}\r\n";
+            $subscribeUrl = $baseUrl . '/api/v1/client/subscribe?token=' . $user->getAttribute(User::FIELD_TOKEN);
+
+            $data .= "{$user->getAttribute(User::FIELD_EMAIL)},$balance,$commissionBalance,$transferEnable,$notUseFlow,$expireDate,$planName,$subscribeUrl\r\n";
+
         }
         echo "\xEF\xBB\xBF" . $data;
     }
 
+    /**
+     * generate
+     *
+     * @param UserGenerate $request
+     * @return Application|ResponseFactory|Response | void
+     * @throws Throwable
+     */
     public function generate(UserGenerate $request)
     {
-        if ($request->input('email_prefix')) {
-            if ($request->input('plan_id')) {
-                $plan = Plan::find($request->input('plan_id'));
-                if (!$plan) {
-                    abort(500, '订阅计划不存在');
-                }
-            }
-            $user = [
-                'email' => $request->input('email_prefix') . '@' . $request->input('email_suffix'),
-                'plan_id' => isset($plan->id) ? $plan->id : NULL,
-                'group_id' => isset($plan->group_id) ? $plan->group_id : NULL,
-                'transfer_enable' => isset($plan->transfer_enable) ? $plan->transfer_enable * 1073741824 : 0,
-                'expired_at' => $request->input('expired_at') ?? NULL,
-                'uuid' => Helper::guid(true),
-                'token' => Helper::guid()
-            ];
-            if (User::where('email', $user['email'])->first()) {
-                abort(500, '邮箱已存在于系统中');
-            }
-            $user['password'] = password_hash($request->input('password') ?? $user['email'], PASSWORD_DEFAULT);
-            if (!User::create($user)) {
-                abort(500, '生成失败');
-            }
-            return response([
-                'data' => true
-            ]);
+        $reqGenerateCount = (int)$request->input('generate_count');
+        if ($reqGenerateCount > 0) {
+            return $this->_multiGenerate($request, $reqGenerateCount);
         }
-        if ($request->input('generate_count')) {
-            $this->multiGenerate($request);
-        }
-    }
+        $reqEmailPrefix = $request->input('email_prefix');
+        $reqPlanId = $request->input('plan_id');
+        $reqExpiredAt = $request->input("expired_at");
+        $reqEmailSuffix = $request->input('email_suffix');
+        $reqPassword = $request->input('password');
+        $email = $reqEmailPrefix . '@' . $reqEmailSuffix;
 
-    private function multiGenerate(Request $request)
-    {
-        if ($request->input('plan_id')) {
-            $plan = Plan::find($request->input('plan_id'));
-            if (!$plan) {
+        if (empty($reqEmailPrefix)) {
+            abort(500, "参数错误");
+        }
+
+        if (User::findByEmail($email)) {
+            abort(500, '邮箱已存在于系统中');
+        }
+
+        $plan = null;
+        if ($reqPlanId) {
+            /**
+             * @var Plan $plan
+             */
+            $plan = Plan::find($reqPlanId);
+            if ($plan === null) {
                 abort(500, '订阅计划不存在');
             }
         }
-        $users = [];
-        for ($i = 0;$i < $request->input('generate_count');$i++) {
-            $user = [
-                'email' => Helper::randomChar(6) . '@' . $request->input('email_suffix'),
-                'plan_id' => isset($plan->id) ? $plan->id : NULL,
-                'group_id' => isset($plan->group_id) ? $plan->group_id : NULL,
-                'transfer_enable' => isset($plan->transfer_enable) ? $plan->transfer_enable * 1073741824 : 0,
-                'expired_at' => $request->input('expired_at') ?? NULL,
-                'uuid' => Helper::guid(true),
-                'token' => Helper::guid(),
-                'created_at' => time(),
-                'updated_at' => time()
-            ];
-            $user['password'] = password_hash($request->input('password') ?? $user['email'], PASSWORD_DEFAULT);
-            array_push($users, $user);
-        }
-        DB::beginTransaction();
-        if (!User::insert($users)) {
-            DB::rollBack();
+
+        $user = new User();
+        $user->setAttribute(User::FIELD_EMAIL, $email);
+        $user->setAttribute(User::FIELD_PLAN_ID, $plan !== null ? $plan->getKey() : 0);
+        $user->setAttribute(User::FIELD_EXPIRED_AT, $reqExpiredAt ?: null);
+        $user->setAttribute(User::FIELD_UUID, Helper::guid(true));
+        $user->setAttribute(User::FIELD_TOKEN, Helper::guid());
+        $user->setAttribute(User::FIELD_PASSWORD, password_hash($reqPassword ??
+            $user->getAttribute(User::FIELD_EMAIL), PASSWORD_DEFAULT));
+        if (!$user->save()) {
             abort(500, '生成失败');
         }
-        DB::commit();
-        $data = "账号,密码,过期时间,UUID,创建时间,订阅地址\r\n";
-        $baseUrl = config('v2board.subscribe_url', config('v2board.app_url', env('APP_URL')));
-        foreach($users as $user) {
-            $expireDate = $user['expired_at'] === NULL ? '长期有效' : date('Y-m-d H:i:s', $user['expired_at']);
-            $createDate = date('Y-m-d H:i:s', $user['created_at']);
-            $password = $request->input('password') ?? $user['email'];
-            $subscribeUrl = $baseUrl . '/api/v1/client/subscribe?token=' . $user['token'];
-            $data .= "{$user['email']},{$password},{$expireDate},{$user['uuid']},{$createDate},{$subscribeUrl}\r\n";
-        }
-        echo $data;
-    }
 
-    public function sendMail(UserSendMail $request)
-    {
-        $sortType = in_array($request->input('sort_type'), ['ASC', 'DESC']) ? $request->input('sort_type') : 'DESC';
-        $sort = $request->input('sort') ? $request->input('sort') : 'created_at';
-        $builder = User::orderBy($sort, $sortType);
-        $this->filter($request, $builder);
-        $users = $builder->get();
-        foreach ($users as $user) {
-            SendEmailJob::dispatch([
-                'email' => $user->email,
-                'subject' => $request->input('subject'),
-                'template_name' => 'notify',
-                'template_value' => [
-                    'name' => config('v2board.app_name', 'V2Board'),
-                    'url' => config('v2board.app_url'),
-                    'content' => $request->input('content')
-                ]
-            ],
-            'send_email_mass');
-        }
 
         return response([
             'data' => true
         ]);
     }
 
-    public function ban(Request $request)
+    /**
+     * multiGenerate
+     *
+     * @param Request $request
+     * @param $count
+     * @throws Throwable
+     */
+    private function _multiGenerate(Request $request, $count)
     {
-        $sortType = in_array($request->input('sort_type'), ['ASC', 'DESC']) ? $request->input('sort_type') : 'DESC';
-        $sort = $request->input('sort') ? $request->input('sort') : 'created_at';
-        $builder = User::orderBy($sort, $sortType);
-        $this->filter($request, $builder);
+        $reqPlanId = $request->input('plan_id');
+        $reqEmailSuffix = $request->input('email_suffix');
+        $reqExpiredAt = $request->input('expired_at');
+        $reqPassword = $request->input('password');
+        if ($reqPlanId) {
+            /**
+             * @var Plan $plan
+             */
+            $plan = Plan::find($reqPlanId);
+            if ($plan === null) {
+                abort(500, '订阅计划不存在');
+            }
+        } else {
+            $plan = null;
+        }
+        $users = [];
+        DB::beginTransaction();
+        for ($i = 0; $i < $count; $i++) {
+            $user = new User();
+            $user->setAttribute(User::FIELD_EMAIL, Helper::randomChar(6) . '@' . $reqEmailSuffix);
+            $user->setAttribute(User::FIELD_PLAN_ID, $plan !== null ? $plan->getKey() : 0);
+            $user->setAttribute(User::FIELD_EXPIRED_AT, $reqExpiredAt ?: null);
+            $user->setAttribute(User::FIELD_UUID, Helper::guid(true));
+            $user->setAttribute(User::FIELD_TOKEN, Helper::guid());
+            $user->setAttribute(User::FIELD_PASSWORD, password_hash($reqPassword ?? $user->getAttribute(User::FIELD_EMAIL), PASSWORD_DEFAULT));
+            $user->setAttribute(User::FIELD_CREATED_AT, time());
+            $user->setAttribute(User::FIELD_UPDATED_AT, time());
+            if (!$user->save()) {
+                DB::rollBack();
+                abort(500, '生成失败');
+            }
+            array_push($users, $user);
+        }
+        DB::commit();
+        $data = "账号,密码,过期时间,UUID,创建时间,订阅地址\r\n";
+        $baseUrl = config('v2board.subscribe_url', config('v2board.app_url', env('APP_URL')));
+        foreach ($users as $user) {
+            /**
+             * @var User $user
+             */
+            $expireDate = empty($user->getAttribute(User::FIELD_EXPIRED_AT)) ? '长期有效' :
+                date('Y-m-d H:i:s', $user->getAttribute(User::FIELD_EXPIRED_AT));
+            $createDate = date('Y-m-d H:i:s', $user->getAttribute(User::FIELD_CREATED_AT));
+            $password = $reqPassword ?? $user->getAttribute(User::FIELD_EMAIL);
+            $subscribeUrl = $baseUrl . '/api/v1/client/subscribe?token=' . $user->getAttribute(User::FIELD_TOKEN);
+            $data .= "{$user['email']},$password,$expireDate,{$user['uuid']},$createDate,$subscribeUrl\r\n";
+        }
+        echo $data;
+    }
+
+    /**
+     * send mail
+     *
+     * @param UserSendMail $request
+     * @return Application|ResponseFactory|Response
+     */
+    public function sendMail(UserSendMail $request)
+    {
+        $reqSortType = in_array($request->input('sort_type'), ["ASC", "DESC"]) ?
+            $request->input('sort_type') : "DESC";
+        $reqSort = $request->input('sort') ? $request->input('sort') : User::FIELD_CREATED_AT;
+        $reqSubject = $request->input('subject');
+        $reqContent = $request->input('content');
+
+        $builder = User::orderBy($reqSort, $reqSortType);
+        $this->_filter($request, $builder);
+        $users = $builder->get();
+        foreach ($users as $user) {
+            SendEmailJob::dispatch([
+                'email' => $user->email,
+                'subject' => $reqSubject,
+                'template_name' => 'notify',
+                'template_value' => [
+                    'name' => config('v2board.app_name', 'V2Board'),
+                    'url' => config('v2board.app_url'),
+                    'content' => $reqContent
+                ]
+            ]);
+        }
+        return response([
+            'data' => true
+        ]);
+    }
+
+    /**
+     * batch ban
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
+    public function batchBan(Request $request)
+    {
+        $reqSortType = in_array($request->input('sort_type'), ["ASC", "DESC"]) ? $request->input('sort_type') : "DESC";
+        $reqSort = $request->input('sort') ? $request->input('sort') : User::FIELD_CREATED_AT;
+        $builder = User::orderBy($reqSort, $reqSortType);
+        $this->_filter($request, $builder);
         try {
             $builder->update([
                 'banned' => 1
             ]);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             abort(500, '处理失败');
         }
 
@@ -287,4 +560,58 @@ class UserController extends Controller
             'data' => true
         ]);
     }
+
+
+    /**
+     * batch drop
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
+    public function batchDrop(Request $request)
+    {
+
+        return response([
+            'data' => true
+        ]);
+
+    }
+
+    /**
+     * 单个删除
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     * @throws Throwable
+     */
+    public function drop(Request $request)
+    {
+        $reqId = $request->get('id');
+        if ($reqId <= 0) {
+            abort(500, "参数有误");
+        }
+
+        /**
+         * @var User $user
+         */
+        $user = User::find($reqId);
+        if ($user === null) {
+            abort(500, "用户未找到");
+        }
+
+        $inviteUserCount = $user->countInvitedUsers();
+        if ($inviteUserCount > 0) {
+            abort(500, '该用户是邀请人，暂不能删除');
+        }
+
+        if ($user->isAdmin()) {
+            abort(500, '该用户是管理员，暂不能删除');
+        }
+
+        $user->drop();
+        return response([
+            'data' => true
+        ]);
+    }
+
 }

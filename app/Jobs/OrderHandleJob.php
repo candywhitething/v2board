@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Models\Order;
-use App\Services\OrderService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -13,6 +12,10 @@ use Illuminate\Queue\SerializesModels;
 class OrderHandleJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    /**
+     * @var Order $order
+     */
     protected $order;
 
     /**
@@ -23,9 +26,7 @@ class OrderHandleJob implements ShouldQueue
     public function __construct($tradeNo)
     {
         $this->onQueue('order_handle');
-        $this->order = Order::where('trade_no', $tradeNo)
-            ->lockForUpdate()
-            ->first();
+        $this->order = Order::findByTradeNo($tradeNo);
     }
 
     /**
@@ -35,17 +36,20 @@ class OrderHandleJob implements ShouldQueue
      */
     public function handle()
     {
-        if (!$this->order) return;
-        $orderService = new OrderService($this->order);
-        switch ($this->order->status) {
-            // cancel
-            case 0:
-                if ($this->order->created_at <= (time() - 1800)) {
-                    $orderService->cancel();
+        if (!$this->order) {
+            return;
+        }
+        $order = $this->order;
+        $orderStatus = $order->getAttribute(Order::FIELD_STATUS);
+
+        switch ($orderStatus) {
+            case Order::STATUS_UNPAID:
+                if ($order->getAttribute(Order::FIELD_CREATED_AT) <= (time() - 1800)) {
+                    $order->cancel();
                 }
                 break;
-            case 1:
-                $orderService->open();
+            case Order::STATUS_PENDING:
+                $order->open();
                 break;
         }
     }

@@ -2,8 +2,8 @@
 
 namespace App\Http\Middleware;
 
-use Closure;
 use App\Models\User;
+use Closure;
 
 class Client
 {
@@ -20,7 +20,7 @@ class Client
         if (empty($token)) {
             abort(403, 'token is null');
         }
-        $user = User::where('token', $token)->first();
+        $user = User::findByToken($token);
         if (!$user) {
             abort(403, 'token is error');
         }

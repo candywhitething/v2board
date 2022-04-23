@@ -27,7 +27,8 @@ class UserGenerate extends FormRequest
     {
         return [
             'generate_count.integer' => '生成数量必须为数字',
-            'generate_count.max' => '生成数量最大为500个'
+            'generate_count.max' => '生成数量最大为500个',
+            'email_suffix.required' => '邮箱后缀必须填写'
         ];
     }
 }

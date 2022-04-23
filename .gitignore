@@ -1,9 +1,12 @@
 /node_modules
 /config/v2board.php
+/config/admin.php
 /public/hot
 /public/storage
+/public/vendor
 /public/env.example.js
 /storage/*.key
+/storage/app
 /vendor
 .env
 .env.backup
@@ -19,3 +22,6 @@ composer.lock
 yarn.lock
 docker-compose.yml
 .DS_Store
+_ide_helper.php
+.phpstorm.meta.php
+config/ide-helper.php

@@ -2,23 +2,28 @@
 <html>
 
 <head>
-    <link rel="stylesheet" href="/theme/{{$theme}}/assets/components.chunk.css?v={{$version}}">
-    <link rel="stylesheet" href="/theme/{{$theme}}/assets/umi.css?v={{$version}}">
-    @if (file_exists(public_path("/theme/{$theme}/assets/custom.css")))
-        <link rel="stylesheet" href="/theme/{{$theme}}/assets/custom.css?v={{$version}}">
-    @endif
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no">
-    @php ($colors = [
-        'darkblue' => '#3b5998',
-        'black' => '#343a40',
-        'default' => '#0665d0',
-        'green' => '#319795'
-    ])
-    <meta name="theme-color" content="{{$colors[$theme_color]}}">
-
+    <meta charset="utf-8"/>
+    <meta
+        name="viewport"
+        content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no"
+    />
     <title>{{$title}}</title>
-    <!-- <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Nunito+Sans:300,400,400i,600,700"> -->
+    <!-- Icons -->
+    <link rel="shortcut icon" href="/theme/{{$theme}}/assets/favicons/favicon-32x32.png"/>
+    <link
+        rel="icon"
+        type="image/png"
+        sizes="192x192"
+        href="/theme/{{$theme}}/assets/favicons/android-icon-192x192.png"
+    />
+    <link
+        rel="apple-touch-icon"
+        sizes="180x180"
+        href="/theme/{{$theme}}/assets/favicons/apple-touch-icon-180x180.png"
+    />
+    <link rel="stylesheet" href="/theme/{{$theme}}/assets/vendors.chunk.css?v={{$version}}"/>
+    <link rel="stylesheet" href="/theme/{{$theme}}/assets/compoments.chunk.css?v={{$version}}"/>
+
     <script>window.routerBase = "/";</script>
     <script>
         window.settings = {
@@ -31,32 +36,34 @@
             version: '{{$version}}',
             background_url: '{{$background_url}}',
             description: '{{$description}}',
-            crisp_id: '{{$crisp_id}}',
-            i18n: [
-                'zh-CN',
-                'en-US',
-                'ja-JP',
-                'vi-VN',
-                'ko-KR',
-                'zh-TW'
-            ]
+            crisp_id: '{{$crisp_id}}'
         }
     </script>
-    <script src="/theme/{{$theme}}/assets/i18n/zh-CN.js?v={{$version}}"></script>
-    <script src="/theme/{{$theme}}/assets/i18n/zh-TW.js?v={{$version}}"></script>
-    <script src="/theme/{{$theme}}/assets/i18n/en-US.js?v={{$version}}"></script>
-    <script src="/theme/{{$theme}}/assets/i18n/ja-JP.js?v={{$version}}"></script>
-    <script src="/theme/{{$theme}}/assets/i18n/vi-VN.js?v={{$version}}"></script>
-    <script src="/theme/{{$theme}}/assets/i18n/ko-KR.js?v={{$version}}"></script>
+    <script>
+        if (
+            window.settings !== undefined &&
+            window.settings.crisp_id !== undefined
+        ) {
+            window.$crisp = [];
+            window.CRISP_WEBSITE_ID = window.settings.crisp_id;
+            (function () {
+                d = document;
+                s = d.createElement("script");
+                s.src = "https://client.crisp.chat/l.js";
+                s.async = 1;
+                d.getElementsByTagName("head")[0].appendChild(s);
+            })();
+        }
+    </script>
 </head>
 
 <body>
 <div id="root"></div>
-<script src="/theme/{{$theme}}/assets/vendors.async.js?v={{$version}}"></script>
-<script src="/theme/{{$theme}}/assets/components.async.js?v={{$version}}"></script>
+<script src="/theme/{{$theme}}/assets/vendors.js?v={{$version}}"></script>
+<script src="/theme/{{$theme}}/assets/compoments.js?v={{$version}}"></script>
 <script src="/theme/{{$theme}}/assets/umi.js?v={{$version}}"></script>
 <!-- Global site tag (gtag.js) - Google Analytics -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-P1E9Z5LRRK"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GENK7PBRME"></script>
 <script>
     window.dataLayer = window.dataLayer || [];
 
@@ -66,11 +73,8 @@
 
     gtag('js', new Date());
 
-    gtag('config', 'G-P1E9Z5LRRK');
+    gtag('config', 'G-GENK7PBRME');
 </script>
-@if (file_exists(public_path("/theme/{$theme}/assets/custom.js")))
-    <script src="/theme/{{$theme}}/assets/custom.js?v={{$version}}"></script>
-@endif
 </body>
 
 </html>

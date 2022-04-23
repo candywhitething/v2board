@@ -3,28 +3,35 @@
 namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Models\Plan;
+use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 class PlanController extends Controller
 {
+    /**
+     * fetch
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
     public function fetch(Request $request)
     {
-        if ($request->input('id')) {
-            $plan = Plan::where('id', $request->input('id'))
-                ->first();
+        $reqId = (int)$request->input("id");
+
+        if ($reqId > 0) {
+            $plan = Plan::find($reqId);
             if (!$plan) {
                 abort(500, __('Subscription plan does not exist'));
             }
-            return response([
-                'data' => $plan
-            ]);
+            $data = $plan;
+        } else {
+            $data = Plan::getShowPlans();
         }
-        $plan = Plan::where('show', 1)
-            ->orderBy('sort', 'ASC')
-            ->get();
+
         return response([
-            'data' => $plan
+            'data' => $data
         ]);
     }
 }

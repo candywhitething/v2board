@@ -3,9 +3,9 @@
 namespace App\Console\Commands;
 
 use App\Models\Plan;
-use Illuminate\Console\Command;
 use App\Models\User;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Console\Command;
+use Symfony\Component\Console\Output\ConsoleOutput;
 
 class ResetTraffic extends Command
 {
@@ -23,6 +23,10 @@ class ResetTraffic extends Command
      * @var string
      */
     protected $description = '流量清空';
+    /**
+     * @var ConsoleOutput
+     */
+    private $_out;
 
     /**
      * Create a new command instance.
@@ -32,91 +36,103 @@ class ResetTraffic extends Command
     public function __construct()
     {
         parent::__construct();
-        $this->builder = User::where('expired_at', '!=', NULL)
-            ->where('expired_at', '>', time());
+        $this->_out = new ConsoleOutput();
+        $this->builder = User::where(User::FIELD_EXPIRED_AT, '>', time());
     }
 
     /**
      * Execute the console command.
      *
-     * @return mixed
+     * @return void
      */
     public function handle()
     {
         ini_set('memory_limit', -1);
-        $resetMethods = Plan::select(
-            DB::raw("GROUP_CONCAT(`id`) as plan_ids"),
-            DB::raw("reset_traffic_method as method")
-        )
-            ->groupBy('reset_traffic_method')
-            ->get()
-            ->toArray();
-        foreach ($resetMethods as $resetMethod) {
-            $planIds = explode(',', $resetMethod['plan_ids']);
-            switch (true) {
-                case ($resetMethod['method'] === NULL): {
-                    $resetTrafficMethod = config('v2board.reset_traffic_method', 0);
-                    $builder = with(clone($this->builder))->whereIn('plan_id', $planIds);
-                    switch ((int)$resetTrafficMethod) {
-                        // month first day
-                        case 0:
-                            $this->resetByMonthFirstDay($builder);
+        $commonResetTrafficMethod = config('v2board.reset_traffic_method', 0);
+        $this->_out->writeln("reset common traffic method: " . $commonResetTrafficMethod);
+
+        $plans = Plan::all();
+        $this->_out->writeln("reset plans count: " . count($plans));
+
+        foreach ($plans as $plan) {
+            $resetTrafficMethod = $plan->getAttribute(Plan::FIELD_RESET_TRAFFIC_METHOD);
+            $planId = $plan->getKey();
+            $this->_out->writeln("plan: " . $planId . ", reset method: " . ($resetTrafficMethod ?? 'system'));
+
+            switch ($resetTrafficMethod) {
+                case Plan::RESET_TRAFFIC_METHOD_SYSTEM:
+                    switch ((int)$commonResetTrafficMethod) {
+                        // 1 a month
+                        case Plan::RESET_TRAFFIC_METHOD_MONTH_FIRST_DAY:
+                            $this->_resetByMonthFirstDay();
                             break;
                         // expire day
-                        case 1:
-                            $this->resetByExpireDay($builder);
+                        case Plan::RESET_TRAFFIC_METHOD_ORDER_DAY:
+                            $this->_resetByOrderDay();
                             break;
-                        // no action
-                        case 2:
+                        default:
                             break;
                     }
                     break;
-                }
-                case ($resetMethod['method'] === 0): {
-                    $builder = with(clone($this->builder))->whereIn('plan_id', $planIds);
-                    $this->resetByMonthFirstDay($builder);
+                case Plan::RESET_TRAFFIC_METHOD_MONTH_FIRST_DAY:
+                    $this->_resetByMonthFirstDay($planId);
                     break;
-                }
-                case ($resetMethod['method'] === 1): {
-                    $builder = with(clone($this->builder))->whereIn('plan_id', $planIds);
-                    $this->resetByExpireDay($builder);
+                case Plan::RESET_TRAFFIC_METHOD_ORDER_DAY:
+                    $this->_resetByOrderDay($planId);
                     break;
-                }
-                case ($resetMethod['method'] === 2): {
+                default:
                     break;
-                }
             }
         }
     }
 
-    private function resetByMonthFirstDay($builder):void
+    /**
+     * reset by month first day
+     */
+    private function _resetByMonthFirstDay($planId = 0): void
     {
+        $builder = $this->builder;
+        if ($planId > 0) {
+            $builder = $builder->where(User::FIELD_PLAN_ID, $planId);
+        }
         if ((string)date('d') === '01') {
-            $builder->update([
+            $result = $builder->update([
                 'u' => 0,
                 'd' => 0
             ]);
+            $this->_out->writeln("updated count: " . $result);
         }
     }
 
-    private function resetByExpireDay($builder):void
+    /**
+     * reset by expire day
+     */
+    private function _resetByOrderDay($planId = 0): void
     {
+        $builder = $this->builder;
+        if ($planId > 0) {
+            $builder = $builder->where(User::FIELD_PLAN_ID, $planId);
+        }
         $lastDay = date('d', strtotime('last day of +0 months'));
         $users = [];
+        /**
+         * @var User $item
+         */
         foreach ($builder->get() as $item) {
-            $expireDay = date('d', $item->expired_at);
-            $today = date('d');
-            if ($expireDay === $today) {
+            $orderDay = (int)$item->getAttribute(User::FIELD_ORDER_DAY);
+            $today = (int)date('d');
+            if ($orderDay === $today) {
                 array_push($users, $item->id);
             }
 
-            if (($today === $lastDay) && $expireDay >= $lastDay) {
+            if (($today === 1) && $orderDay >= $lastDay) {
                 array_push($users, $item->id);
             }
         }
-        User::whereIn('id', $users)->update([
+        $result = User::whereIn('id', $users)->update([
             'u' => 0,
             'd' => 0
         ]);
+        $this->_out->writeln("updated count: " . $result);
     }
 }

@@ -1,10 +1,7 @@
 <?php
 
 use Illuminate\Support\Str;
-use Linfo\Linfo;
 
-$lInfo = new Linfo();
-$parser = $lInfo->getParser();
 
 return [
 
@@ -19,7 +16,7 @@ return [
     |
     */
 
-    'domain' => null,
+    'domain' => env('HORIZON_DOMAIN', null),
 
     /*
     |--------------------------------------------------------------------------
@@ -32,7 +29,8 @@ return [
     |
     */
 
-    'path' => 'monitor',
+    'path' => env('HORIZON_PATH', 'monitor'),
+
 
     /*
     |--------------------------------------------------------------------------
@@ -60,7 +58,7 @@ return [
 
     'prefix' => env(
         'HORIZON_PREFIX',
-        Str::slug(env('APP_NAME', 'laravel'), '_').'_horizon:'
+        Str::slug(env('APP_NAME', 'laravel'), '_') . '_horizon:'
     ),
 
     /*
@@ -155,7 +153,7 @@ return [
     |
     */
 
-    'memory_limit' => 32,
+    'memory_limit' => 256,
 
     /*
     |--------------------------------------------------------------------------
@@ -167,22 +165,72 @@ return [
     | queued jobs and will be provisioned by Horizon during deployment.
     |
     */
-
+    'defaults' => [],
     'environments' => [
         'local' => [
-            'V2board' => [
+            'traffic_fetch' => [
+                'connection' => 'redis',
+                'queue' => [
+                    'traffic_fetch',
+                ],
+                'balance' => false,
+                'minProcesses' => 1,
+                'maxProcesses' => 1,
+                'tries' => 1,
+                'nice' => 0,
+            ],
+            'traffic_server_log' => [
+                'connection' => 'redis',
+                'queue' => [
+                    'traffic_server_log',
+                ],
+                'balance' => false,
+                'minProcesses' => 1,
+                'maxProcesses' => 1,
+                'tries' => 1,
+                'nice' => 0,
+            ],
+            'traffic_user_log' => [
+                'connection' => 'redis',
+                'queue' => [
+                    'traffic_user_log',
+                ],
+                'balance' => false,
+                'minProcesses' => 1,
+                'maxProcesses' => 1,
+                'tries' => 1,
+                'nice' => 0,
+            ],
+            'send_telegram' => [
+                'connection' => 'redis',
+                'queue' => [
+                    'send_telegram',
+                ],
+                'balance' => false,
+                'minProcesses' => 1,
+                'maxProcesses' => 1,
+                'tries' => 1,
+                'nice' => 0,
+            ],
+            'send_email ' => [
+                'connection' => 'redis',
+                'queue' => [
+                    'send_email',
+                ],
+                'balance' => false,
+                'minProcesses' => 1,
+                'maxProcesses' => 1,
+                'tries' => 1,
+                'nice' => 0,
+            ],
+            'order_handle ' => [
                 'connection' => 'redis',
                 'queue' => [
                     'order_handle',
-                    'traffic_fetch',
-                    'stat',
-                    'send_email',
-                    'send_email_mass',
-                    'send_telegram',
                 ],
-                'balance' => 'auto',
+                'balance' => false,
                 'minProcesses' => 1,
-                'maxProcesses' => (int)ceil($parser->getRam()['total'] / 1024 / 1024 / 1024 * 6),
+                'maxProcesses' => 1,
                 'tries' => 1,
                 'nice' => 0,
             ],

@@ -18,6 +18,7 @@ class UserUpdate extends FormRequest
             'password' => 'nullable|min:8',
             'transfer_enable' => 'numeric',
             'expired_at' => 'nullable|integer',
+            'order_day' => 'nullable|integer|min:1:max:31',
             'banned' => 'required|in:0,1',
             'plan_id' => 'nullable|integer',
             'commission_rate' => 'nullable|integer|min:0|max:100',
@@ -29,7 +30,9 @@ class UserUpdate extends FormRequest
             'balance' => 'integer',
             'commission_type' => 'integer',
             'commission_balance' => 'integer',
-            'remarks' => 'nullable'
+            'remarks' => 'nullable',
+            'invite_user_email' => 'email',
+            'invite_user_id' => 'nullable|integer'
         ];
     }
 
@@ -40,6 +43,9 @@ class UserUpdate extends FormRequest
             'email.email' => '邮箱格式不正确',
             'transfer_enable.numeric' => '流量格式不正确',
             'expired_at.integer' => '到期时间格式不正确',
+            'order_day.in' => '订单日格式不正确',
+            'order_day.min' => '订单日最小数值为1',
+            'order_day.max' => '订单日最大数值为31',
             'banned.required' => '是否封禁不能为空',
             'banned.in' => '是否封禁格式不正确',
             'is_admin.required' => '是否管理员不能为空',
@@ -59,6 +65,8 @@ class UserUpdate extends FormRequest
             'd.integer' => '下行流量格式不正确',
             'balance.integer' => '余额格式不正确',
             'commission_balance.integer' => '佣金格式不正确',
+            'invite_user_id.integer' => '邀请者ID格式不正确',
+            'invite_user_id.nullable' => '邀请者ID格式不正确',
             'password.min' => '密码长度最小8位'
         ];
     }

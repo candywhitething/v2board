@@ -4,148 +4,240 @@ namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\User\OrderSave;
-use App\Models\CommissionLog;
-use App\Models\Payment;
-use App\Services\CouponService;
-use App\Services\OrderService;
-use App\Services\PaymentService;
-use App\Services\UserService;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
+use App\Models\Exceptions\CouponException;
+use App\Models\Exceptions\OrderException;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\User;
+use App\Services\PaymentService;
 use App\Utils\Helper;
-use Omnipay\Omnipay;
-use Stripe\Stripe;
-use Stripe\Source;
-use Library\BitpayX;
-use Library\MGate;
-use Library\Epay;
+use Exception;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class OrderController extends Controller
 {
+
+    /**
+     * fetch
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
     public function fetch(Request $request)
     {
-        $model = Order::where('user_id', $request->session()->get('id'))
-            ->orderBy('created_at', 'DESC');
-        if ($request->input('status') !== null) {
-            $model->where('status', $request->input('status'));
+        $sessionId = $request->session()->get('id');
+        $reqStatus = $request->input('status');
+        $reqCurrent = (int)$request->input('current') ? $request->input('current') : 1;
+        $reqPageSize = (int)$request->input('pageSize') >= 10 ? $request->input('pageSize') : 10;
+
+        $conditions = [];
+        $conditions[Order::FIELD_USER_ID] = $sessionId;
+
+        if ($reqStatus != null) {
+            $conditions[Order::FIELD_STATUS] = (int)$reqStatus;
         }
-        $order = $model->get();
-        $plan = Plan::get();
-        for ($i = 0; $i < count($order); $i++) {
-            for ($x = 0; $x < count($plan); $x++) {
-                if ($order[$i]['plan_id'] === $plan[$x]['id']) {
-                    $order[$i]['plan'] = $plan[$x];
+
+        $orderModel = Order::where($conditions)->orderBy(Order::CREATED_AT, 'desc');
+        $total = $orderModel->count();
+        $orders = $orderModel->forPage($reqCurrent, $reqPageSize)->get();
+        $plans = Plan::get();
+
+        foreach ($orders as $order) {
+            /**
+             * @var  Order $order
+             */
+            $orderPlanId = $order->getAttribute(Order::FIELD_PLAN_ID);
+
+            foreach ($plans as $plan) {
+                /**
+                 * @var Plan $plan
+                 */
+                $planId = $plan->getKey();
+                if ($orderPlanId == $planId) {
+                    $order->setAttribute("plan", $plan);
                 }
             }
         }
+
         return response([
-            'data' => $order->makeHidden(['id', 'user_id'])
+            'data' => $orders->makeHidden([Order::FIELD_ID, Order::FIELD_USER_ID]),
+            'total' => $total
         ]);
     }
 
-    public function detail(Request $request)
+
+    /**
+     * details
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
+    public function details(Request $request)
     {
-        $order = Order::where('user_id', $request->session()->get('id'))
-            ->where('trade_no', $request->input('trade_no'))
-            ->first();
-        if (!$order) {
+        $reqTradeNo = $request->input('trade_no');
+        /**
+         * @var Order $order
+         */
+        $order = Order::findByTradeNo($reqTradeNo);
+        if ($order === null) {
             abort(500, __('Order does not exist or has been paid'));
         }
-        $order['plan'] = Plan::find($order->plan_id);
+
+        $order['plan'] = Plan::find($order->getAttribute(Order::FIELD_PLAN_ID));
         $order['try_out_plan_id'] = (int)config('v2board.try_out_plan_id');
         if (!$order['plan']) {
             abort(500, __('Subscription plan does not exist'));
-        }
-        if ($order->surplus_order_ids) {
-            $order['surplus_orders'] = Order::whereIn('id', $order->surplus_order_ids)->get();
         }
         return response([
             'data' => $order
         ]);
     }
 
+    /**
+     * save
+     *
+     * @param OrderSave $request
+     * @return Application|ResponseFactory|Response
+     * @throws Throwable
+     */
     public function save(OrderSave $request)
     {
-        $userService = new UserService();
-        if ($userService->isNotCompleteOrderByUserId($request->session()->get('id'))) {
-            abort(500, __('You have an unpaid or pending order, please try again later or cancel it'));
-        }
+        $reqId = $request->input('plan_id');
+        $reqPriceId = $request->input('price_id');
+        $sessionId = $request->session()->get('id');
+        $reqCouponCode = $request->input('coupon_code');
 
-        $plan = Plan::find($request->input('plan_id'));
-        $user = User::find($request->session()->get('id'));
-
-        if (!$plan) {
+        /**
+         * @var Plan $plan
+         */
+        $plan = Plan::find($reqId);
+        if (!$plan || !$plan->isShowOn()) {
             abort(500, __('Subscription plan does not exist'));
         }
 
-        if ($plan[$request->input('period')] === NULL) {
-            abort(500, __('This payment period cannot be purchased, please choose another period'));
+        /**
+         * @var Collection $prices
+         */
+        $prices = $plan->getAttribute(Plan::FIELD_PRICES);
+        $price = null;
+        if ($prices->count() > 0) {
+            $price = collect($prices)->filter(function ($value, $key) use ($reqPriceId) {
+                return $value['id'] === $reqPriceId;
+            })->pop();
         }
 
-        if ($request->input('period') === 'reset_price') {
-            if ($user->expired_at <= time() || !$user->plan_id) {
-                abort(500, __('Subscription has expired or no active subscription, unable to purchase Data Reset Package'));
-            }
+        if ($price === null) {
+            abort(500, __("This payment cycle cannot be purchased, please choose another cycle"));
         }
 
-        if ((!$plan->show && !$plan->renew) || (!$plan->show && $user->plan_id !== $plan->id)) {
-            if ($request->input('period') !== 'reset_price') {
+        $priceCollection = collect($price);
+        $priceType = $priceCollection->get(Plan::SUB_FIELD_PRICE_TYPE);
+        $priceValue = $priceCollection->get(Plan::SUB_FIELD_PRICE_VALUE);
+        $priceName = $priceCollection->get(Plan::SUB_FIELD_PRICE_NAME);
+
+
+        /**
+         * @var User $user
+         */
+        $user = User::lockForUpdate()->find($sessionId);
+        if ($user == null) {
+            abort(500, __('user.user.changePassword.user_not_exist'));
+        }
+
+        if ($user->isNotCompletedOrders()) {
+            abort(500, __('You have an unpaid or pending order, please try again later or cancel it'));
+        }
+
+        if (!$plan->isShowOn() && $plan->isRenewOn() || (!$plan->isShowOn() && $user->getAttribute(User::FIELD_PLAN_ID)
+                !== $plan->getKey())) {
+            if ($priceType !== Plan::PRICE_TYPE_RESET) {
                 abort(500, __('This subscription has been sold out, please choose another subscription'));
             }
         }
 
-        if (!$plan->renew && $user->plan_id == $plan->id && $request->input('period') !== 'reset_price') {
+        if (!$plan->isRenewOn() && $user->getAttribute(User::FIELD_PLAN_ID) == $plan->getKey() && $priceType !== Plan::PRICE_TYPE_RESET) {
             abort(500, __('This subscription cannot be renewed, please change to another subscription'));
         }
 
 
-        if (!$plan->show && $plan->renew && !$userService->isAvailable($user)) {
+        if ($priceType === Plan::PRICE_TYPE_RESET) {
+            if (($user->getAttribute(User::FIELD_EXPIRED_AT) !== null && $user->getAttribute(User::FIELD_EXPIRED_AT) <= time()) || !$user->getAttribute(User::FIELD_PLAN_ID)) {
+                abort(500, __('Subscription has expired or no active subscription, unable to purchase Data Reset Package'));
+            }
+        }
+
+        if (!$plan->isShowOn() && $plan->isRenewOn() && !$user->isAvailable()) {
             abort(500, __('This subscription has expired, please change to another subscription'));
+        }
+
+        if (!$plan->isAllowID((int)$user->getAttribute(User::FIELD_PLAN_ID))) {
+            abort(500, __('Not eligible to purchase this subscription'));
         }
 
         DB::beginTransaction();
         $order = new Order();
-        $orderService = new OrderService($order);
-        $order->user_id = $request->session()->get('id');
-        $order->plan_id = $plan->id;
-        $order->period = $request->input('period');
-        $order->trade_no = Helper::generateOrderNo();
-        $order->total_amount = $plan[$request->input('period')];
+        $order->setAttribute(Order::FIELD_USER_ID, $sessionId);
+        $order->setAttribute(Order::FIELD_PLAN_ID, $reqId);
+        $order->setAttribute(Order::FIELD_PRICE_NAME, $priceName);
+        $order->setAttribute(Order::FIELD_PRICE_META, $price);
+        $order->setAttribute(Order::FIELD_TRADE_NO, Helper::generateOrderNo());
+        $order->setAttribute(Order::FIELD_TOTAL_AMOUNT, $priceValue);
 
-        if ($request->input('coupon_code')) {
-            $couponService = new CouponService($request->input('coupon_code'));
-            if (!$couponService->use($order)) {
+        if ($reqCouponCode) {
+            try {
+                $couponId = $order->useCoupon($reqCouponCode);
+                if ($couponId === 0) {
+                    DB::rollBack();
+                    abort(500, __('Coupon failed'));
+                }
+                $order->setAttribute(Order::FIELD_COUPON_ID, $couponId);
+            } catch (CouponException $e) {
                 DB::rollBack();
-                abort(500, __('Coupon failed'));
+                abort($e->getCode(), $e->getMessage());
             }
-            $order->coupon_id = $couponService->getId();
         }
 
-        $orderService->setVipDiscount($user);
-        $orderService->setOrderType($user);
-        $orderService->setInvite($user);
+        $configCommissionFirstTimeEnable = (bool)config('v2board.commission_first_time_enable', 1);
+        $configCommissionRate = (int)config('v2board.invite_commission', 10);
+        $order->setUserDiscount($user);
+        $order->setOrderType($user);
+        $order->setInvite($user, $configCommissionFirstTimeEnable, $configCommissionRate);
 
-        if ($user->balance && $order->total_amount > 0) {
-            $remainingBalance = $user->balance - $order->total_amount;
-            $userService = new UserService();
+        if ($order->getAttribute(Order::FIELD_TYPE) == Order::TYPE_CHANGE) {
+            if (!(int)config('v2board.plan_change_enable', 1)) {
+                abort(500, '目前不允许更改订阅，请联系客服或提交工单操作');
+            }
+        }
+
+        $userBalance = (int)$user->getAttribute(User::FIELD_BALANCE);
+        $totalAmount = (int)$order->getAttribute(Order::FIELD_TOTAL_AMOUNT);
+
+        if ($userBalance > 0 && $totalAmount > 0) {
+            $remainingBalance = $userBalance - $totalAmount;
             if ($remainingBalance > 0) {
-                if (!$userService->addBalance($order->user_id, - $order->total_amount)) {
-                    DB::rollBack();
-                    abort(500, __('Insufficient balance'));
-                }
-                $order->balance_amount = $order->total_amount;
-                $order->total_amount = 0;
+                $user->addBalance(-$totalAmount);
+                //余额
+                $order->setAttribute(Order::FIELD_BALANCE_AMOUNT, $totalAmount);
+                //总金额
+                $order->setAttribute(Order::FIELD_TOTAL_AMOUNT, 0);
             } else {
-                if (!$userService->addBalance($order->user_id, - $user->balance)) {
-                    DB::rollBack();
-                    abort(500, __('Insufficient balance'));
-                }
-                $order->balance_amount = $user->balance;
-                $order->total_amount = $order->total_amount - $user->balance;
+                $user->addBalance(-$userBalance);
+                //余额
+                $order->setAttribute(Order::FIELD_BALANCE_AMOUNT, $userBalance);
+                $order->setAttribute(Order::FIELD_TOTAL_AMOUNT, $totalAmount - $userBalance);
+            }
+
+            if (!$user->save()) {
+                DB::rollBack();
+                abort(500, __('Insufficient balance'));
             }
         }
 
@@ -157,93 +249,144 @@ class OrderController extends Controller
         DB::commit();
 
         return response([
-            'data' => $order->trade_no
+            'data' => $order->getAttribute(Order::FIELD_TRADE_NO)
         ]);
     }
 
     public function checkout(Request $request)
     {
-        $tradeNo = $request->input('trade_no');
-        $method = $request->input('method');
-        $order = Order::where('trade_no', $tradeNo)
-            ->where('user_id', $request->session()->get('id'))
-            ->where('status', 0)
+        $reqTradeNo = $request->input('trade_no');
+        $reqMethod = $request->input('method');
+        $reqToken = $request->input('token', "");
+        $sessionId = $request->session()->get('id');
+        $order = Order::where(Order::FIELD_TRADE_NO, $reqTradeNo)
+            ->where(Order::FIELD_USER_ID, $sessionId)
+            ->where(Order::FIELD_STATUS, Order::STATUS_UNPAID)
             ->first();
-        if (!$order) {
+
+
+        /**
+         * @var Order $order
+         */
+        if ($order === null) {
             abort(500, __('Order does not exist or has been paid'));
         }
-        // free process
-        if ($order->total_amount <= 0) {
-            $orderService = new OrderService($order);
-            if (!$orderService->paid($order->trade_no)) abort(500, '');
+
+        /**
+         * @var Plan $plan
+         */
+        $plan = $order->plan();
+        if ($plan === null || !$plan->isShowOn()) {
+            abort(500, "该订阅无法销售");
+        }
+
+        // free process 免费订单处理
+        if ($order->getAttribute(Order::FIELD_TOTAL_AMOUNT) <= 0) {
+            $order->setAttribute(Order::FIELD_TOTAL_AMOUNT, 0);
+            $order->setAttribute(Order::FIELD_STATUS, Order::STATUS_PENDING);
+            $order->save();
             return response([
                 'type' => -1,
                 'data' => true
             ]);
         }
-        $payment = Payment::find($method);
-        if (!$payment || $payment->enable !== 1) abort(500, __('Payment method is not available'));
-        $paymentService = new PaymentService($payment->payment, $payment->id);
-        $result = $paymentService->pay([
-            'trade_no' => $tradeNo,
-            'total_amount' => $order->total_amount,
-            'user_id' => $order->user_id,
-            'stripe_token' => $request->input('token')
-        ]);
-        $order->update(['payment_id' => $method]);
-        return response([
-            'type' => $result['type'],
-            'data' => $result['data']
-        ]);
+        $data = [];
+        /**
+         * @var Payment $payment
+         */
+        $payment = Payment::find($reqMethod);
+        if ($payment === null || !$payment->isEnabled()) {
+            abort(500, __('Payment method is not available'));
+        }
+
+        try {
+            $paymentService = new PaymentService($payment->getAttribute(Payment::FIELD_PAYMENT), $payment);
+            $result = $paymentService->pay($order, $reqToken);
+            $order->setAttribute(Order::FIELD_PAYMENT_ID, $reqMethod);
+            if (!$order->save()) {
+                abort(500, "保存失败");
+            }
+            $data = [
+                'type' => $result['type'],
+                'data' => $result['data']
+            ];
+
+        } catch (Exception $e) {
+            abort(500, "支付流程失败" . $e->getMessage());
+        }
+
+        return response($data);
     }
 
+    /**
+     * order
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
     public function check(Request $request)
     {
-        $tradeNo = $request->input('trade_no');
-        $order = Order::where('trade_no', $tradeNo)
-            ->where('user_id', $request->session()->get('id'))
-            ->first();
-        if (!$order) {
+        $reqTradeNo = $request->input('trade_no');
+        /**
+         * @var Order $order
+         */
+        $order = Order::findByTradeNo($reqTradeNo);
+        if ($order === null) {
             abort(500, __('Order does not exist'));
         }
         return response([
-            'data' => $order->status
+            'data' => $order->getAttribute(Order::FIELD_STATUS)
         ]);
     }
 
+    /**
+     * get payment method
+     *
+     * @return Application|ResponseFactory|Response
+     */
     public function getPaymentMethod()
     {
         $methods = Payment::select([
-            'id',
-            'name',
-            'payment',
-            'icon'
-        ])
-            ->where('enable', 1)->get();
+            Payment::FIELD_ID,
+            Payment::FIELD_NAME,
+            Payment::FIELD_PAYMENT,
+            Payment::FIELD_ICON_TYPE
+        ])->where(Payment::FIELD_ENABLE, Payment::PAYMENT_ON)->get();
 
         return response([
             'data' => $methods
         ]);
     }
 
+    /**
+     * cancel
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     * @throws Throwable
+     */
     public function cancel(Request $request)
     {
-        if (empty($request->input('trade_no'))) {
+        $reqTradeNo = $request->input('trade_no');
+        if (empty($reqTradeNo)) {
             abort(500, __('Invalid parameter'));
         }
-        $order = Order::where('trade_no', $request->input('trade_no'))
-            ->where('user_id', $request->session()->get('id'))
-            ->first();
-        if (!$order) {
+
+        /**
+         * @var Order $order
+         */
+        $order = Order::findByTradeNo($reqTradeNo);
+        if ($order == null) {
             abort(500, __('Order does not exist'));
         }
-        if ($order->status !== 0) {
-            abort(500, __('You can only cancel pending orders'));
-        }
-        $orderService = new OrderService($order);
-        if (!$orderService->cancel()) {
+
+        try {
+            $order->cancel();
+        } catch (OrderException $e) {
+            Log::error($e->getMessage());
             abort(500, __('Cancel failed'));
         }
+
         return response([
             'data' => true
         ]);

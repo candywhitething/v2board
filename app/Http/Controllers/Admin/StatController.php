@@ -2,124 +2,137 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Controller;
+use App\Models\Order;
+use App\Models\OrderStat;
 use App\Models\ServerShadowsocks;
 use App\Models\ServerTrojan;
-use App\Services\ServerService;
-use Illuminate\Http\Request;
-use App\Http\Controllers\Controller;
-use App\Models\ServerGroup;
-use App\Models\ServerV2ray;
-use App\Models\Plan;
-use App\Models\User;
+use App\Models\ServerVmess;
 use App\Models\Ticket;
-use App\Models\Order;
-use App\Models\StatOrder;
-use App\Models\StatServer;
-use Illuminate\Support\Facades\Cache;
+use App\Models\TrafficServerLog;
+use App\Models\User;
+use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 
 class StatController extends Controller
 {
-    public function getOverride(Request $request)
+
+    /**
+     * override
+     *
+     * @return ResponseFactory|Response
+     */
+    public function override()
     {
         return response([
             'data' => [
-                'month_income' => Order::where('created_at', '>=', strtotime(date('Y-m-1')))
-                    ->where('created_at', '<', time())
-                    ->whereNotIn('status', [0, 2])
-                    ->sum('total_amount'),
-                'month_register_total' => User::where('created_at', '>=', strtotime(date('Y-m-1')))
-                    ->where('created_at', '<', time())
-                    ->count(),
-                'ticket_pending_total' => Ticket::where('status', 0)
-                    ->count(),
-                'commission_pending_total' => Order::where('commission_status', 0)
-                    ->where('invite_user_id', '!=', NULL)
-                    ->whereNotIn('status', [0, 2])
-                    ->where('commission_balance', '>', 0)
-                    ->count(),
-                'day_income' => Order::where('created_at', '>=', strtotime(date('Y-m-d')))
-                    ->where('created_at', '<', time())
-                    ->whereNotIn('status', [0, 2])
-                    ->sum('total_amount'),
-                'last_month_income' => Order::where('created_at', '>=', strtotime('-1 month', strtotime(date('Y-m-1'))))
-                    ->where('created_at', '<', strtotime(date('Y-m-1')))
-                    ->whereNotIn('status', [0, 2])
-                    ->sum('total_amount')
+                'month_income' => Order::sumMonthIncome(),
+                'month_register_total' => User::countMonthRegister(),
+                'ticket_pending_total' => Ticket::countTicketPending(),
+                'commission_pending_total' => Order::countCommissionPending(),
+                'day_income' => Order::sumDayIncome(),
+                'last_month_income' => Order::sumLastMonthIncome()
             ]
         ]);
     }
 
-    public function getOrder(Request $request)
+    /**
+     * order
+     *
+     * @return ResponseFactory|Response
+     */
+    public function order()
     {
-        $statistics = StatOrder::where('record_type', 'd')
+        $orderStats = OrderStat::where(OrderStat::FIELD_RECORD_TYPE, OrderStat::RECORD_TYPE_D)
             ->limit(31)
-            ->orderBy('record_at', 'DESC')
-            ->get()
-            ->toArray();
+            ->orderBy(OrderStat::FIELD_RECORD_AT, "DESC")
+            ->get();
         $result = [];
-        foreach ($statistics as $statistic) {
-            $date = date('m-d', $statistic['record_at']);
+
+        /**
+         * @var OrderStat $stat
+         */
+        foreach ($orderStats as $stat) {
+            $date = date('m-d', $stat->getAttribute(OrderStat::FIELD_RECORD_AT));
             array_push($result, [
                 'type' => '收款金额',
                 'date' => $date,
-                'value' => $statistic['order_amount'] / 100
+                'value' => $stat->getAttribute(OrderStat::FIELD_ORDER_AMOUNT) / 100
             ]);
+
             array_push($result, [
                 'type' => '收款笔数',
                 'date' => $date,
-                'value' => $statistic['order_count']
+                'value' => $stat->getAttribute(OrderStat::FIELD_ORDER_COUNT)
             ]);
+
             array_push($result, [
                 'type' => '佣金金额',
                 'date' => $date,
-                'value' => $statistic['commission_amount'] / 100
+                'value' => $stat->getAttribute(OrderStat::FIELD_COMMISSION_AMOUNT) / 100
             ]);
+
             array_push($result, [
                 'type' => '佣金笔数',
                 'date' => $date,
-                'value' => $statistic['commission_count']
+                'value' => $stat->getAttribute(OrderStat::FIELD_COMMISSION_COUNT)
             ]);
         }
-        $result = array_reverse($result);
         return response([
-            'data' => $result
+            'data' => array_reverse($result)
         ]);
     }
 
-    public function getServerLastRank()
+    /**
+     *
+     *
+     * @param Request $request
+     * @return \Illuminate\Contracts\Foundation\Application|ResponseFactory|Response
+     */
+    public function serverRank(Request $request)
     {
+        $reqDate = $request->get('date') ?? date('Y-m-d', time());
+
         $servers = [
-            'shadowsocks' => ServerShadowsocks::where('parent_id', null)->get()->toArray(),
-            'vmess' => ServerV2ray::where('parent_id', null)->get()->toArray(),
-            'trojan' => ServerTrojan::where('parent_id', null)->get()->toArray()
+            'shadowsocks' => ServerShadowsocks::where(ServerShadowsocks::FIELD_PARENT_ID, 0)->orWhere(ServerShadowsocks::FIELD_PARENT_ID, NULL)->get(),
+            'vmess' => ServerVmess::where(ServerVmess::FIELD_PARENT_ID, 0)->orWhere(ServerShadowsocks::FIELD_PARENT_ID, NULL)->get(),
+            'trojan' => ServerTrojan::where(ServerVmess::FIELD_PARENT_ID, 0)->orWhere(ServerShadowsocks::FIELD_PARENT_ID, NULL)->get()
         ];
-        $timestamp = strtotime('-1 day', strtotime(date('Y-m-d')));
-        $statistics = StatServer::select([
-                'server_id',
-                'server_type',
-                'u',
-                'd',
-                DB::raw('(u+d) as total')
-            ])
-            ->where('record_at', '>=', $timestamp)
-            ->where('record_type', 'd')
+
+        $timestamp = strtotime($reqDate);
+        $statistics = TrafficServerLog::select([
+            TrafficServerLog::FIELD_SERVER_ID,
+            TrafficServerLog::FIELD_SERVER_TYPE,
+            TrafficServerLog::FIELD_U,
+            TrafficServerLog::FIELD_D,
+            DB::raw('(u+d) as total')
+        ])
+            ->where(TrafficServerLog::FIELD_LOG_AT, '=', $timestamp)
             ->limit(10)
-            ->orderBy('total', 'DESC')
-            ->get()
-            ->toArray();
-        foreach ($statistics as $k => $v) {
-            foreach ($servers[$v['server_type']] as $server) {
-                if ($server['id'] === $v['server_id']) {
-                    $statistics[$k]['server_name'] = $server['name'];
+            ->orderBy('total', "DESC")
+            ->get();
+
+
+        foreach ($statistics as $stats) {
+            /**
+             * @var TrafficServerLog $stats
+             */
+            foreach ($servers[$stats->getAttribute(TrafficServerLog::FIELD_SERVER_TYPE)] as $server) {
+                /**
+                 * @var ServerVmess $server
+                 */
+                if ($server->getKey() === $stats->getAttribute(TrafficServerLog::FIELD_SERVER_ID)) {
+                    $stats['server_name'] = $server->getAttribute(ServerVmess::FIELD_NAME);
                 }
             }
-            $statistics[$k]['total'] = $statistics[$k]['total'] / 1073741824;
+            $stats['total'] = floatval(number_format($stats['total'] / 1073741824, 3));
         }
-        array_multisort(array_column($statistics, 'total'), SORT_DESC, $statistics);
+        $statsData = $statistics->toArray();
+        array_multisort(array_column($statsData, 'total'), SORT_DESC, $statsData);
         return response([
-            'data' => $statistics
+            'data' => $statsData
         ]);
     }
 }
-

@@ -2,12 +2,10 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\StatServerJob;
-use Illuminate\Console\Command;
 use App\Models\Order;
-use App\Models\StatOrder;
-use App\Models\ServerLog;
-use Illuminate\Support\Facades\DB;
+use App\Models\OrderStat;
+use Illuminate\Console\Command;
+use Symfony\Component\Console\Output\ConsoleOutput;
 
 class V2boardStatistics extends Command
 {
@@ -24,6 +22,10 @@ class V2boardStatistics extends Command
      * @var string
      */
     protected $description = '统计任务';
+    /**
+     * @var ConsoleOutput
+     */
+    private $_out;
 
     /**
      * Create a new command instance.
@@ -32,47 +34,65 @@ class V2boardStatistics extends Command
      */
     public function __construct()
     {
+        $this->_out = new ConsoleOutput();
         parent::__construct();
     }
 
     /**
      * Execute the console command.
      *
-     * @return mixed
+     * @return void
      */
     public function handle()
     {
-        ini_set('memory_limit', -1);
-        $this->statOrder();
+        $this->_statOrder();
     }
 
-    private function statOrder()
+    /**
+     * stat order
+     */
+    private function _statOrder()
     {
         $endAt = strtotime(date('Y-m-d'));
         $startAt = strtotime('-1 day', $endAt);
-        $builder = Order::where('paid_at', '>=', $startAt)
-            ->where('paid_at', '<', $endAt)
-            ->whereNotIn('status', [0, 2]);
+        $builder = Order::where(Order::FIELD_PAID_AT, '>=', $startAt)
+            ->where(Order::FIELD_PAID_AT, '<', $endAt)
+            ->whereNotIn(Order::FIELD_STATUS, [Order::STATUS_UNPAID, Order::STATUS_CANCELLED]);
         $orderCount = $builder->count();
         $orderAmount = $builder->sum('total_amount');
-        $builder = $builder->whereNotNull('actual_commission_balance');
+        $this->_out->writeln("order count: " . $orderCount);
+        $this->_out->writeln("order amount: " . $orderAmount);
+
+        $builder = $builder->where(Order::FIELD_COMMISSION_BALANCE, '!=', 0);
         $commissionCount = $builder->count();
-        $commissionAmount = $builder->sum('actual_commission_balance');
-        $data = [
-            'order_count' => $orderCount,
-            'order_amount' => $orderAmount,
-            'commission_count' => $commissionCount,
-            'commission_amount' => $commissionAmount,
-            'record_type' => 'd',
-            'record_at' => $startAt
-        ];
-        $statistic = StatOrder::where('record_at', $startAt)
-            ->where('record_type', 'd')
+        $commissionAmount = $builder->sum(Order::FIELD_COMMISSION_BALANCE);
+
+        $this->_out->writeln("order commission count: " . $commissionCount);
+        $this->_out->writeln("order commission amount: " . $commissionAmount);
+
+        /**
+         * @var OrderStat $stat
+         */
+        $orderStat = OrderStat::where(OrderStat::FIELD_RECORD_AT, $startAt)
+            ->where(OrderStat::FIELD_RECORD_TYPE, OrderStat::RECORD_TYPE_D)
             ->first();
-        if ($statistic) {
-            $statistic->update($data);
-            return;
+
+        if ($orderStat === null) {
+            $this->_out->writeln("order stat record not found");
+            $orderStat = new OrderStat();
+            $orderStat->setAttribute(OrderStat::FIELD_RECORD_TYPE, OrderStat::RECORD_TYPE_D);
+            $orderStat->setAttribute(OrderStat::FIELD_RECORD_AT, $startAt);
         }
-        StatOrder::create($data);
+
+        $orderStat->setAttribute(OrderStat::FIELD_ORDER_COUNT, $orderCount);
+        $orderStat->setAttribute(OrderStat::FIELD_ORDER_AMOUNT, $orderAmount);
+        $orderStat->setAttribute(OrderStat::FIELD_COMMISSION_COUNT, $commissionCount);
+        $orderStat->setAttribute(OrderStat::FIELD_COMMISSION_AMOUNT, $commissionAmount);
+
+        if (!$orderStat->save()) {
+            $this->_out->writeln("order stats save failed");
+        } else {
+            $this->_out->writeln("order status save success");
+        }
     }
 }

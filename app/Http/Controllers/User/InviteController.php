@@ -3,74 +3,108 @@
 namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
-use App\Models\CommissionLog;
-use Illuminate\Http\Request;
-use App\Models\User;
-use App\Models\Order;
 use App\Models\InviteCode;
+use App\Models\Order;
+use App\Models\User;
 use App\Utils\Helper;
+use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 class InviteController extends Controller
 {
+    /**
+     * save
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
     public function save(Request $request)
     {
-        if (InviteCode::where('user_id', $request->session()->get('id'))->where('status', 0)->count() >= config('v2board.invite_gen_limit', 5)) {
+        $sessionId = $request->session()->get('id');
+        /**
+         * @var User $user
+         */
+        $user = User::find($sessionId);
+        if ($user === null) {
+            abort(500, __('The user does not exist'));
+        }
+
+        $inviteCodesCount = $user->countUnusedInviteCodes();
+        $inviteGenLimit = config('v2board.invite_gen_limit', 5);
+
+
+        if ($inviteCodesCount >= $inviteGenLimit) {
             abort(500, __('The maximum number of creations has been reached'));
         }
         $inviteCode = new InviteCode();
-        $inviteCode->user_id = $request->session()->get('id');
-        $inviteCode->code = Helper::randomChar(8);
+        $inviteCode->setAttribute(InviteCode::FIELD_USER_ID, $sessionId);
+        $inviteCode->setAttribute(InviteCode::FIELD_CODE, Helper::randomChar(8));
         return response([
             'data' => $inviteCode->save()
         ]);
     }
 
+    /**
+     * details
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
     public function details(Request $request)
     {
+        $sessionId = $request->session()->get('id');
+        /**
+         * @var User $user
+         */
+        $user = User::find($sessionId);
+        if ($user === null) {
+            abort(500, __('The user does not exist'));
+        }
+        $invitedOrderDetails = $user->getInvitedOrderDetails([Order::STATUS_COMPLETED]);
         return response([
-            'data' => CommissionLog::where('invite_user_id', $request->session()->get('id'))
-                ->select([
-                    'id',
-                    'trade_no',
-                    'order_amount',
-                    'get_amount',
-                    'created_at'
-                ])
-                ->get()
+            'data' => $invitedOrderDetails,
         ]);
     }
 
+    /**
+     * fetch
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
     public function fetch(Request $request)
     {
-        $codes = InviteCode::where('user_id', $request->session()->get('id'))
-            ->where('status', 0)
-            ->get();
-        $commission_rate = config('v2board.invite_commission', 10);
-        $user = User::find($request->session()->get('id'));
-        if ($user->commission_rate) {
-            $commission_rate = $user->commission_rate;
+        $sessionId = $request->session()->get('id');
+        /**
+         * @var User $user
+         */
+        $user = User::find($sessionId);
+        if ($user === null) {
+            abort(500, __('The user does not exist'));
         }
+
+        $unUsedCodes = $user->getUnusedInviteCodes();
+        $defaultCommissionRate = config('v2board.invite_commission', 10);
+        $commissionRate = $user->getAttribute(User::FIELD_COMMISSION_RATE) ?: $defaultCommissionRate;
+
+
         $stat = [
             //已注册用户数
-            (int)User::where('invite_user_id', $request->session()->get('id'))->count(),
+            $user->countInvitedUsers(),
             //有效的佣金
-            (int)Order::where('status', 3)
-                ->where('commission_status', 2)
-                ->where('invite_user_id', $request->session()->get('id'))
-                ->sum('commission_balance'),
+            $user->statCommissionBalance(Order::STATUS_COMPLETED, Order::COMMISSION_STATUS_VALID),
             //确认中的佣金
-            (int)Order::where('status', 3)
-                ->where('commission_status', 0)
-                ->where('invite_user_id', $request->session()->get('id'))
-                ->sum('commission_balance'),
+            $user->statCommissionBalance(Order::STATUS_COMPLETED, Order::COMMISSION_STATUS_PENDING),
             //佣金比例
-            (int)$commission_rate,
+            (int)$commissionRate,
             //可用佣金
-            (int)$user->commission_balance
+            (int)$user->getAttribute(User::FIELD_COMMISSION_BALANCE)
         ];
+
         return response([
             'data' => [
-                'codes' => $codes,
+                'codes' => $unUsedCodes,
                 'stat' => $stat
             ]
         ]);

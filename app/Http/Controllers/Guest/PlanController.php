@@ -2,15 +2,14 @@
 
 namespace App\Http\Controllers\Guest;
 
-use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use App\Models\Plan;
 
 class PlanController extends Controller
 {
-    public function fetch(Request $request)
+    public function fetch()
     {
-        $plan = Plan::where('show', 1)->get();
+        $plan = Plan::where(Plan::FIELD_SHOW, Plan::SHOW_ON)->get();
         return response([
             'data' => $plan
         ]);

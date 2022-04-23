@@ -3,23 +3,43 @@
 namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
-use App\Services\CouponService;
-use Illuminate\Http\Request;
 use App\Models\Coupon;
+use App\Models\Exceptions\CouponException;
+use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 class CouponController extends Controller
 {
+
+    /**
+     * check
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
     public function check(Request $request)
     {
-        if (empty($request->input('code'))) {
+        $sessionID = $request->session()->get('id', 0);
+        $reqCode = $request->input("code");
+        $reqPlanID = $request->input("plan_id", 0);
+        $reqCycle = $request->input('cycle', '');
+
+        if (empty($reqCode)) {
             abort(500, __('Coupon cannot be empty'));
         }
-        $couponService = new CouponService($request->input('code'));
-        $couponService->setPlanId($request->input('plan_id'));
-        $couponService->setUserId($request->session()->get('id'));
-        $couponService->check();
+
+        /**
+         * @var Coupon $coupon
+         */
+        try {
+            $coupon = Coupon::checkCode($reqCode, $reqPlanID, $sessionID, $reqCycle);
+        } catch (CouponException $e) {
+            abort(500, $e->getMessage());
+        }
+
         return response([
-            'data' => $couponService->getCoupon()
+            'data' => $coupon
         ]);
     }
 }

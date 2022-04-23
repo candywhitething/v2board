@@ -2,9 +2,8 @@
 
 namespace App\Http\Controllers\Guest;
 
-use App\Utils\Dict;
 use App\Http\Controllers\Controller;
-use Illuminate\Support\Facades\Http;
+use App\Utils\Dict;
 
 class CommController extends Controller
 {
@@ -16,7 +15,7 @@ class CommController extends Controller
                 'is_email_verify' => (int)config('v2board.email_verify', 0) ? 1 : 0,
                 'is_invite_force' => (int)config('v2board.invite_force', 0) ? 1 : 0,
                 'email_whitelist_suffix' => (int)config('v2board.email_whitelist_enable', 0)
-                    ? $this->getEmailSuffix()
+                    ? $this->_getEmailSuffix()
                     : 0,
                 'is_recaptcha' => (int)config('v2board.recaptcha_enable', 0) ? 1 : 0,
                 'recaptcha_site_key' => config('v2board.recaptcha_site_key'),
@@ -26,19 +25,13 @@ class CommController extends Controller
         ]);
     }
 
-    private function getEmailSuffix()
+
+    private function _getEmailSuffix()
     {
         $suffix = config('v2board.email_whitelist_suffix', Dict::EMAIL_WHITELIST_SUFFIX_DEFAULT);
         if (!is_array($suffix)) {
             return preg_split('/,/', $suffix);
         }
         return $suffix;
-    }
-
-    public function getHitokoto()
-    {
-        return response([
-            'data' => Http::get('https://v1.hitokoto.cn/')->json()
-        ]);
     }
 }

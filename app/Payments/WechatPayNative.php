@@ -5,10 +5,12 @@ namespace App\Payments;
 use Omnipay\Omnipay;
 use Omnipay\WechatPay\Helper;
 
-class WechatPayNative {
+class WechatPayNative
+{
     public function __construct($config)
     {
         $this->config = $config;
+        $this->customResult = '<xml><return_code><![CDATA[SUCCESS]]></return_code><return_msg><![CDATA[OK]]></return_msg></xml>';
     }
 
     public function form()
@@ -41,14 +43,14 @@ class WechatPayNative {
         $gateway->setNotifyUrl($order['notify_url']);
 
         $params = [
-            'body'              => $order['trade_no'],
-            'out_trade_no'      => $order['trade_no'],
-            'total_fee'         => $order['total_amount'],
-            'spbill_create_ip'  => '0.0.0.0',
-            'fee_type'          => 'CNY'
+            'body' => $order['trade_no'],
+            'out_trade_no' => $order['trade_no'],
+            'total_fee' => $order['total_amount'],
+            'spbill_create_ip' => '0.0.0.0',
+            'fee_type' => 'CNY'
         ];
 
-        $request  = $gateway->purchase($params);
+        $request = $gateway->purchase($params);
         $response = $request->send();
         $response = $response->getData();
         if ($response['return_code'] !== 'SUCCESS') {
@@ -56,8 +58,7 @@ class WechatPayNative {
         }
         return [
             'type' => 0,
-            'data' => $response['code_url'],
-            'custom_result' => '<xml><return_code><![CDATA[SUCCESS]]></return_code><return_msg><![CDATA[OK]]></return_msg></xml>'
+            'data' => $response['code_url']
         ];
     }
 

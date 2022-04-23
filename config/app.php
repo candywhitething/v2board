@@ -1,5 +1,4 @@
 <?php
-
 return [
 
     /*
@@ -67,7 +66,7 @@ return [
     |
     */
 
-    'timezone' => 'Asia/Shanghai',
+    'timezone' => 'Asia/Ho_Chi_Minh',
 
     /*
     |--------------------------------------------------------------------------
@@ -80,7 +79,7 @@ return [
     |
     */
 
-    'locale' => 'zh-CN',
+    'locale' => 'vi-VN',
 
     /*
     |--------------------------------------------------------------------------
@@ -93,7 +92,7 @@ return [
     |
     */
 
-    'fallback_locale' => 'zh-CN',
+    'fallback_locale' => 'vi-VN',
 
     /*
     |--------------------------------------------------------------------------
@@ -106,7 +105,7 @@ return [
     |
     */
 
-    'faker_locale' => 'zh-CN',
+    'faker_locale' => 'vi-VN',
 
     /*
     |--------------------------------------------------------------------------
@@ -161,6 +160,7 @@ return [
         Illuminate\Translation\TranslationServiceProvider::class,
         Illuminate\Validation\ValidationServiceProvider::class,
         Illuminate\View\ViewServiceProvider::class,
+        Fruitcake\Cors\CorsServiceProvider::class,
 
         /*
          * Package Service Providers...
@@ -171,11 +171,9 @@ return [
          */
         App\Providers\AppServiceProvider::class,
         App\Providers\AuthServiceProvider::class,
-        // App\Providers\BroadcastServiceProvider::class,
         App\Providers\EventServiceProvider::class,
-        App\Providers\HorizonServiceProvider::class,
         App\Providers\RouteServiceProvider::class,
-
+        App\Providers\EmailServiceProvider::class,
     ],
 
     /*
@@ -237,5 +235,5 @@ return [
     | The only modification by laravel config
     |
     */
-    'version' => '1.5.5.1646764814759'
+    'version' => '1.18.4'
 ];

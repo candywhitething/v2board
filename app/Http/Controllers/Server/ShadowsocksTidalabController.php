@@ -2,78 +2,110 @@
 
 namespace App\Http\Controllers\Server;
 
-use App\Models\ServerShadowsocks;
-use App\Services\ServerService;
-use App\Services\UserService;
-use App\Utils\CacheKey;
-use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
-use Illuminate\Support\Facades\Cache;
+use App\Jobs\ServerLogJob;
+use App\Jobs\TrafficFetchJob;
+use App\Jobs\TrafficServerLogJob;
+use App\Jobs\TrafficUserLogJob;
+use App\Models\ServerShadowsocks;
+use App\Models\ServerVmess;
+use App\Models\User;
+use App\Utils\CacheKey;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Redis;
 
 /*
  * Tidal Lab Shadowsocks
  * Github: https://github.com/tokumeikoi/tidalab-ss
  */
+
 class ShadowsocksTidalabController extends Controller
 {
-    public function __construct(Request $request)
-    {
-        $token = $request->input('token');
-        if (empty($token)) {
-            abort(500, 'token is null');
-        }
-        if ($token !== config('v2board.server_token')) {
-            abort(500, 'token is error');
-        }
-    }
-
-    // 后端获取用户
+    /**
+     * User
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
     public function user(Request $request)
     {
-        ini_set('memory_limit', -1);
-        $nodeId = $request->input('node_id');
-        $server = ServerShadowsocks::find($nodeId);
-        if (!$server) {
+        $reqNodeId = $request->input('node_id');
+        $clientIP = $request->getClientIp();
+        /**
+         * @var ServerShadowsocks $server
+         */
+        $server = ServerShadowsocks::find($reqNodeId);
+        if ($server === null) {
             abort(500, 'fail');
         }
-        Cache::put(CacheKey::get('SERVER_SHADOWSOCKS_LAST_CHECK_AT', $server->id), time(), 3600);
-        $serverService = new ServerService();
-        $users = $serverService->getAvailableUsers($server->group_id);
+
         $result = [];
+        $users = $server->findAvailableUsers();
         foreach ($users as $user) {
+            /**
+             * @var User $user
+             */
             array_push($result, [
-                'id' => $user->id,
-                'port' => $server->server_port,
-                'cipher' => $server->cipher,
-                'secret' => $user->uuid
+                'id' => $user->getKey(),
+                'port' => $server->getAttribute(ServerShadowsocks::FIELD_SERVER_PORT),
+                'cipher' => $server->getAttribute(ServerShadowsocks::FIELD_CIPHER),
+                'secret' => $user->getAttribute(User::FIELD_UUID)
             ]);
         }
+
+        Redis::hset(CacheKey::get(CacheKey::SERVER_SHADOWSOCKS_LAST_CHECK_AT, $server->getKey()), $clientIP, time());
+        Redis::hset(CacheKey::SERVER_SHADOWSOCKS_LAST_CHECK_AT, $server->getKey(), time());
+
         return response([
             'data' => $result
         ]);
     }
 
-    // 后端提交数据
+    /**
+     * 后端提交数据
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
     public function submit(Request $request)
     {
-//         Log::info('serverSubmitData:' . $request->input('node_id') . ':' . file_get_contents('php://input'));
-        $server = ServerShadowsocks::find($request->input('node_id'));
-        if (!$server) {
+        $reqNodeId = $request->input('node_id');
+        $server = ServerShadowsocks::find($reqNodeId);
+        $clientIP = $request->getClientIp();
+
+        if ($server === null) {
             return response([
                 'ret' => 0,
                 'msg' => 'server is not found'
             ]);
         }
         $data = file_get_contents('php://input');
+
         $data = json_decode($data, true);
-        Cache::put(CacheKey::get('SERVER_SHADOWSOCKS_ONLINE_USER', $server->id), count($data), 3600);
-        Cache::put(CacheKey::get('SERVER_SHADOWSOCKS_LAST_PUSH_AT', $server->id), time(), 3600);
-        $userService = new UserService();
-        foreach ($data as $item) {
-            $u = $item['u'] * $server->rate;
-            $d = $item['d'] * $server->rate;
-            $userService->trafficFetch($u, $d, $item['user_id'], $server, 'shadowsocks');
+        if ($data === null || !is_array($data)) {
+            return response([
+                'ret' => 0,
+                'msg' => 'parameter error'
+            ]);
         }
+
+        foreach ($data as $item) {
+            $rate = $server->getAttribute(ServerVmess::FIELD_RATE);
+            $u = $item[User::FIELD_U] * $rate;
+            $d = $item[User::FIELD_D] * $rate;
+            $userId = $item['user_id'];
+            TrafficFetchJob::dispatch($u, $d, $userId);
+            TrafficServerLogJob::dispatch($item[User::FIELD_U], $item[User::FIELD_D], $server->getKey(), ServerShadowsocks::TYPE);
+            TrafficUserLogJob::dispatch($u, $d, $userId);
+        }
+
+        Redis::hset(CacheKey::get(CacheKey::SERVER_SHADOWSOCKS_LAST_PUSH_AT, $server->getKey()), $clientIP, time());
+        Redis::hset(CacheKey::SERVER_SHADOWSOCKS_LAST_PUSH_AT, $server->getKey(), time());
+        Redis::hset(CacheKey::get(CacheKey::SERVER_SHADOWSOCKS_ONLINE_USER, $server->getKey()),
+            $clientIP, json_encode(['time' => time(), 'count' => count($data)]));
 
         return response([
             'ret' => 1,

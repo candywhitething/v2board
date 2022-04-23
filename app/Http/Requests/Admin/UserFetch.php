@@ -14,8 +14,9 @@ class UserFetch extends FormRequest
     public function rules()
     {
         return [
-            'filter.*.key' => 'required|in:id,email,transfer_enable,d,expired_at,uuid,token,invite_by_email,invite_user_id,plan_id,banned,remarks',
-            'filter.*.condition' => 'required|in:>,<,=,>=,<=,模糊,!=',
+            'filter.*.key' => 'required|in:id,email,transfer_enable,u,d,expired_at,created_at,updated_at,uuid,token,
+            invite_by_email,invite_user_id,plan_id,banned,remarks,last_login_ip,last_login_at,register_ip,is_admin',
+            'filter.*.condition' => 'required|in:>,<,=,>=,<=,模糊,!=,like,range',
             'filter.*.value' => 'required'
         ];
     }

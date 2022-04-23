@@ -3,20 +3,28 @@
 namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\User\UserChangePassword;
 use App\Http\Requests\User\UserTransfer;
 use App\Http\Requests\User\UserUpdate;
-use App\Http\Requests\User\UserChangePassword;
-use App\Utils\CacheKey;
-use Illuminate\Http\Request;
-use App\Models\User;
 use App\Models\Plan;
-use App\Models\Ticket;
+use App\Models\TrafficServerLog;
+use App\Models\TrafficUserLog;
+use App\Models\User;
 use App\Utils\Helper;
-use App\Models\Order;
-use Illuminate\Support\Facades\Cache;
+use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
+
 
 class UserController extends Controller
 {
+    /**
+     * logout
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
     public function logout(Request $request)
     {
         $request->session()->flush();
@@ -25,23 +33,35 @@ class UserController extends Controller
         ]);
     }
 
+    /**
+     * change password
+     *
+     * @param UserChangePassword $request
+     * @return ResponseFactory|Response
+     */
     public function changePassword(UserChangePassword $request)
     {
-        $user = User::find($request->session()->get('id'));
-        if (!$user) {
+        $sessionId = $request->session()->get('id');
+        $reqOldPassword = $request->input('old_password');
+        $reqNewPassword = $request->input('new_password');
+        /**
+         * @var User $user
+         */
+        $user = User::find($sessionId);
+        if ($user === null) {
             abort(500, __('The user does not exist'));
         }
+
         if (!Helper::multiPasswordVerify(
-            $user->password_algo,
-            $user->password_salt,
-            $request->input('old_password'),
-            $user->password)
-        ) {
+            $user->getAttribute(User::FIELD_PASSWORD_ALGO),
+            $user->getAttribute(User::FIELD_PASSWORD_SALT),
+            $reqOldPassword, $user->getAttribute(User::FIELD_PASSWORD))) {
             abort(500, __('The old password is wrong'));
         }
-        $user->password = password_hash($request->input('new_password'), PASSWORD_DEFAULT);
-        $user->password_algo = NULL;
-        $user->password_salt = NULL;
+
+        $user->setAttribute(User::FIELD_PASSWORD, password_hash($reqNewPassword, PASSWORD_DEFAULT));
+        $user->setAttribute(User::FIELD_PASSWORD_ALGO, NULL);
+        $user->setAttribute(User::FIELD_PASSWORD_SALT, NULL);
         if (!$user->save()) {
             abort(500, __('Save failed'));
         }
@@ -51,112 +71,179 @@ class UserController extends Controller
         ]);
     }
 
+    /**
+     * info
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
     public function info(Request $request)
     {
-        $user = User::where('id', $request->session()->get('id'))
-            ->select([
-                'email',
-                'transfer_enable',
-                'last_login_at',
-                'created_at',
-                'banned',
-                'remind_expire',
-                'remind_traffic',
-                'expired_at',
-                'balance',
-                'commission_balance',
-                'plan_id',
-                'discount',
-                'commission_rate',
-                'telegram_id',
-                'uuid'
-            ])
-            ->first();
-        if (!$user) {
+        $sessionId = $request->session()->get('id');
+        /**
+         * @var User $user
+         */
+        $user = User::find($sessionId);
+        if ($user == null) {
             abort(500, __('The user does not exist'));
         }
-        $user['avatar_url'] = 'https://cdn.v2ex.com/gravatar/' . md5($user->email) . '?s=64&d=identicon';
+
+        $data = [
+            User::FIELD_EMAIL => $user->getAttribute(User::FIELD_EMAIL),
+            User::FIELD_LAST_LOGIN_AT => $user->getAttribute(User::FIELD_LAST_LOGIN_AT),
+            User::FIELD_CREATED_AT => $user->getAttribute(User::FIELD_CREATED_AT),
+            User::FIELD_BANNED => $user->getAttribute(User::FIELD_BANNED),
+            User::FIELD_REMIND_TRAFFIC => $user->getAttribute(User::FIELD_REMIND_TRAFFIC),
+            User::FIELD_REMIND_EXPIRE => $user->getAttribute(User::FIELD_REMIND_EXPIRE),
+            User::FIELD_EXPIRED_AT => $user->getAttribute(User::FIELD_EXPIRED_AT),
+            User::FIELD_BALANCE => $user->getAttribute(User::FIELD_BALANCE),
+            User::FIELD_COMMISSION_BALANCE => $user->getAttribute(User::FIELD_COMMISSION_BALANCE),
+            User::FIELD_PLAN_ID => $user->getAttribute(User::FIELD_PLAN_ID),
+            User::FIELD_DISCOUNT => $user->getAttribute(User::FIELD_DISCOUNT),
+            User::FIELD_COMMISSION_RATE => $user->getAttribute(User::FIELD_COMMISSION_RATE),
+            User::FIELD_TELEGRAM_ID => $user->getAttribute(User::FIELD_TELEGRAM_ID),
+        ];
+
         return response([
-            'data' => $user
+            'data' => $data
         ]);
     }
 
-    public function getStat(Request $request)
+    /**
+     * stat
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
+    public function stat(Request $request)
     {
+        $sessionId = $request->session()->get('id');
+        /**
+         * @var User $user
+         */
+        $user = User::find($sessionId);
+        if ($user == NULL) {
+            abort(500, __('user.user.info.user_not_exist'));
+        }
+
         $stat = [
-            Order::where('status', 0)
-                ->where('user_id', $request->session()->get('id'))
-                ->count(),
-            Ticket::where('status', 0)
-                ->where('user_id', $request->session()->get('id'))
-                ->count(),
-            User::where('invite_user_id', $request->session()->get('id'))
-                ->count()
+            $user->countUnpaidOrders(),
+            $user->countUnprocessedTickets(),
+            $user->countInvitedUsers()
         ];
+
         return response([
             'data' => $stat
         ]);
     }
 
-    public function getSubscribe(Request $request)
+    /**
+     * subscribe
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
+    public function subscribe(Request $request)
     {
-        $user = User::where('id', $request->session()->get('id'))
-            ->select([
-                'plan_id',
-                'token',
-                'expired_at',
-                'u',
-                'd',
-                'transfer_enable',
-                'email'
-            ])
-            ->first();
-        if (!$user) {
+        $sessionId = $request->session()->get('id');
+        /**
+         * @var User $user
+         */
+        $user = User::find($sessionId);
+
+        if ($user === null) {
             abort(500, __('The user does not exist'));
         }
-        if ($user->plan_id) {
-            $user['plan'] = Plan::find($user->plan_id);
-            if (!$user['plan']) {
+
+        $plan = null;
+        if ($user->getAttribute(User::FIELD_PLAN_ID) > 0) {
+            if ($user->plan() === null) {
                 abort(500, __('Subscription plan does not exist'));
             }
+            $plan = $user->plan();
         }
-        $user['subscribe_url'] = Helper::getSubscribeHost() . "/api/v1/client/subscribe?token={$user['token']}";
-        $user['reset_day'] = $this->getResetDay($user);
+        $subscribeUrl = Helper::getSubscribeHost() . "/api/v1/client/subscribe?token={$user->getAttribute(User::FIELD_TOKEN)}";
+
+        $data = [
+            "subscribe_url" => $subscribeUrl,
+            "plan" => $user->plan(),
+            'reset_day' => $user->getResetDay(),
+            'is_available' => $user->isAvailable(),
+            User::FIELD_ID => $user->getKey(),
+            User::FIELD_PLAN_ID => $user->getAttribute(User::FIELD_PLAN_ID),
+            User::FIELD_TOKEN => $user->getAttribute(User::FIELD_TOKEN),
+            User::FIELD_EXPIRED_AT => $user->getAttribute(User::FIELD_EXPIRED_AT),
+            User::FIELD_U => $user->getAttribute(User::FIELD_U),
+            User::FIELD_D => $user->getAttribute(User::FIELD_D),
+            Plan::FIELD_TRANSFER_ENABLE_VALUE => $plan ? $plan->getAttribute(Plan::FIELD_TRANSFER_ENABLE_VALUE) : null,
+            Plan::FIELD_TIME_LIMIT => $plan ? (bool)$plan->getAttribute(Plan::FIELD_TIME_LIMIT) : false,
+            Plan::FIELD_START_SEC => $plan ? $plan->getAttribute(Plan::FIELD_START_SEC) : null,
+            Plan::FIELD_END_SEC => $plan ? $plan->getAttribute(Plan::FIELD_END_SEC) : null,
+            User::FIELD_EMAIL => $user->getAttribute(User::FIELD_EMAIL),
+        ];
+
         return response([
-            'data' => $user
+            "data" => $data
         ]);
     }
 
+    /**
+     * resetSecurity
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
     public function resetSecurity(Request $request)
     {
-        $user = User::find($request->session()->get('id'));
-        if (!$user) {
+        $sessionId = $request->session()->get('id');
+        /**
+         * @var User $user
+         */
+        $user = User::find($sessionId);
+        if ($user === null) {
             abort(500, __('The user does not exist'));
         }
-        $user->uuid = Helper::guid(true);
-        $user->token = Helper::guid();
+
+        $user->setAttribute(User::FIELD_UUID, Helper::guid(true));
+        $user->setAttribute(User::FIELD_TOKEN, Helper::guid());
+
         if (!$user->save()) {
             abort(500, __('Reset failed'));
         }
+
         return response([
-            'data' => config('v2board.subscribe_url', config('v2board.app_url', env('APP_URL'))) . '/api/v1/client/subscribe?token=' . $user->token
+            'data' => config('v2board.subscribe_url', config('v2board.app_url', env('APP_URL'))) . '/api/v1/client/subscribe?token=' . $user->getAttribute(User::FIELD_TOKEN)
         ]);
     }
 
+    /**
+     * update
+     *
+     * @param UserUpdate $request
+     * @return ResponseFactory|Response
+     */
     public function update(UserUpdate $request)
     {
-        $updateData = $request->only([
-            'remind_expire',
-            'remind_traffic'
-        ]);
-
-        $user = User::find($request->session()->get('id'));
-        if (!$user) {
+        $sessionId = $request->session()->get('id');
+        $reqRemindExpire = $request->input("remind_expire");
+        $reqRemindTraffic = $request->input("remind_traffic");
+        /**
+         * @var User $user
+         */
+        $user = User::find($sessionId);
+        if ($user === null) {
             abort(500, __('The user does not exist'));
         }
-        try {
-            $user->update($updateData);
-        } catch (\Exception $e) {
+
+        if ($reqRemindExpire !== null) {
+            $user->setAttribute(User::FIELD_REMIND_EXPIRE, (int)$reqRemindExpire);
+        }
+
+        if ($reqRemindTraffic !== null) {
+            $user->setAttribute(User::FIELD_REMIND_TRAFFIC, (int)$reqRemindTraffic);
+        }
+
+        if (!$user->save()) {
             abort(500, __('Save failed'));
         }
 
@@ -165,17 +252,31 @@ class UserController extends Controller
         ]);
     }
 
+    /**
+     * transfer
+     *
+     * @param UserTransfer $request
+     * @return ResponseFactory|Response
+     */
     public function transfer(UserTransfer $request)
     {
-        $user = User::find($request->session()->get('id'));
-        if (!$user) {
+        $sessionId = $request->session()->get('id');
+        $reqTransferAmount = $request->input('transfer_amount');
+        /**
+         * @var User $user
+         */
+        $user = User::find($sessionId);
+        if ($user === null) {
             abort(500, __('The user does not exist'));
         }
-        if ($request->input('transfer_amount') > $user->commission_balance) {
+
+        if ($reqTransferAmount > $user->getAttribute(User::FIELD_COMMISSION_BALANCE)) {
             abort(500, __('Insufficient commission balance'));
         }
-        $user->commission_balance = $user->commission_balance - $request->input('transfer_amount');
-        $user->balance = $user->balance + $request->input('transfer_amount');
+
+        $user->setAttribute(User::FIELD_COMMISSION_BALANCE, $user->getAttribute(User::FIELD_COMMISSION_BALANCE) - $reqTransferAmount);
+        $user->setAttribute(User::FIELD_BALANCE, $user->getAttribute(User::FIELD_BALANCE) + $reqTransferAmount);
+
         if (!$user->save()) {
             abort(500, __('Transfer failed'));
         }
@@ -184,54 +285,61 @@ class UserController extends Controller
         ]);
     }
 
-    private function getResetDay(User $user)
+
+    /**
+     *  fetch traffic log
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
+    public function trafficLogs(Request $request)
     {
-        if ($user->expired_at <= time() || $user->expired_at === NULL) return null;
-        // if reset method is not reset
-        if (isset($user->plan->reset_traffic_method) && $user->plan->reset_traffic_method === 2) return null;
-        $day = date('d', $user->expired_at);
-        $today = date('d');
-        $lastDay = date('d', strtotime('last day of +0 months'));
+        $reqCurrent = (int)$request->input('current') ? $request->input('current') : 1;
+        $reqPageSize = (int)$request->input('pageSize') >= 10 ? $request->input('pageSize') : 10;
+        $sessionId = $request->session()->get('id');
 
-        if ((int)config('v2board.reset_traffic_method') === 0 ||
-            (isset($user->plan->reset_traffic_method) && $user->plan->reset_traffic_method === 0))
-        {
-            return $lastDay - $today;
-        }
-        if ((int)config('v2board.reset_traffic_method') === 1 ||
-            (isset($user->plan->reset_traffic_method) && $user->plan->reset_traffic_method === 1))
-        {
-            if ((int)$day >= (int)$today && (int)$day >= (int)$lastDay) {
-                return $lastDay - $today;
-            }
-            if ((int)$day >= (int)$today) {
-                return $day - $today;
-            } else {
-                return $lastDay - $today + $day;
-            }
-        }
-        return null;
-    }
+        $userLogModel = TrafficUserLog::where(TrafficUserLog::FIELD_USER_ID, $sessionId)
+            ->orderBy(TrafficServerLog::FIELD_LOG_AT, "DESC");
 
+        $total = $userLogModel->count();
+        $res = $userLogModel->forPage($reqCurrent, $reqPageSize)->get();
 
-    public function getQuickLoginUrl(Request $request)
-    {
-        $user = User::find($request->session()->get('id'));
-        if (!$user) {
-            abort(500, __('The user does not exist'));
-        }
-
-        $code = Helper::guid();
-        $key = CacheKey::get('TEMP_TOKEN', $code);
-        Cache::put($key, $user->id, 60);
-        $redirect = '/#/login?verify=' . $code . '&redirect=' . ($request->input('redirect') ? $request->input('redirect') : 'dashboard');
-        if (config('v2board.app_url')) {
-            $url = config('v2board.app_url') . $redirect;
-        } else {
-            $url = url($redirect);
-        }
         return response([
-            'data' => $url
+            'data' => $res,
+            'total' => $total
         ]);
     }
+
+
+    /**
+     * fetch traffic heatmap
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
+    public function trafficHeatMap(Request $request)
+    {
+        $reqStartAt = (int)$request->input('start_at') ?: strtotime('-365days 00:00:00');
+        $sessionId = $request->session()->get('id');
+
+        $userTrafficLogs = TrafficUserLog::select([
+            TrafficUserLog::FIELD_LOG_DATE,
+            TrafficUserLog::FIELD_LOG_AT,
+            DB::raw('(u+d) as total')
+        ])->where(TrafficUserLog::FIELD_USER_ID, $sessionId)->where(TrafficUserLog::FIELD_LOG_AT, '>=', $reqStartAt)->get();
+
+        $data = [];
+        /**
+         * @var TrafficUserLog $log
+         */
+        foreach ($userTrafficLogs as $log) {
+            $log->makeHidden([TrafficUserLog::FIELD_LOG_DATE]);
+            $data[$log->getAttribute(TrafficUserLog::FIELD_LOG_DATE)] = $log;
+        }
+
+        return response([
+            'data' => $data
+        ]);
+    }
+
 }

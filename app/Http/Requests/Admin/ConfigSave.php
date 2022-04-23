@@ -25,10 +25,6 @@ class ConfigSave extends FormRequest
             'commission_withdraw_limit' => 'nullable|numeric',
             'commission_withdraw_method' => 'nullable|array',
             'withdraw_close_enable' => 'in:0,1',
-            'commission_distribution_enable' => 'in:0,1',
-            'commission_distribution_l1' => 'nullable|numeric',
-            'commission_distribution_l2' => 'nullable|numeric',
-            'commission_distribution_l3' => 'nullable|numeric',
             // site
             'stop_register' => 'in:0,1',
             'email_verify' => 'in:0,1',
@@ -46,50 +42,13 @@ class ConfigSave extends FormRequest
             'recaptcha_key' => '',
             'recaptcha_site_key' => '',
             'tos_url' => 'nullable|url',
-            'currency' => '',
-            'currency_symbol' => '',
             // subscribe
             'plan_change_enable' => 'in:0,1',
-            'reset_traffic_method' => 'in:0,1,2',
-            'surplus_enable' => 'in:0,1',
-            'new_order_event_id' => 'in:0,1',
-            'renew_order_event_id' => 'in:0,1',
-            'change_order_event_id' => 'in:0,1',
+            'reset_traffic_method' => 'in:0,1',
+            'rate_limit_per_minute' => 'integer',
+            'subscribe_cache_enable' => 'in:0,1',
             // server
             'server_token' => 'nullable|min:16',
-            'server_license' => 'nullable',
-            'server_log_enable' => 'in:0,1',
-            'server_v2ray_domain' => '',
-            'server_v2ray_protocol' => '',
-            // alipay
-            'alipay_enable' => 'in:0,1',
-            'alipay_appid' => 'nullable|integer|min:16',
-            'alipay_pubkey' => 'max:2048',
-            'alipay_privkey' => 'max:2048',
-            // stripe
-            'stripe_alipay_enable' => 'in:0,1',
-            'stripe_wepay_enable' => 'in:0,1',
-            'stripe_card_enable' => 'in:0,1',
-            'stripe_sk_live' => '',
-            'stripe_pk_live' => '',
-            'stripe_webhook_key' => '',
-            'stripe_currency' => 'in:hkd,usd,sgd,eur,gbp,jpy,cad',
-            // bitpayx
-            'bitpayx_name' => '',
-            'bitpayx_enable' => 'in:0,1',
-            'bitpayx_appsecret' => '',
-            // mGate
-            'mgate_name' => '',
-            'mgate_enable' => 'in:0,1',
-            'mgate_url' => 'nullable|url',
-            'mgate_app_id' => '',
-            'mgate_app_secret' => '',
-            // Epay
-            'epay_name' => '',
-            'epay_enable' => 'in:0,1',
-            'epay_url' => 'nullable|url',
-            'epay_pid' => '',
-            'epay_key' => '',
             // frontend
             'frontend_theme' => '',
             'frontend_theme_sidebar' => 'in:dark,light',
@@ -99,6 +58,8 @@ class ConfigSave extends FormRequest
             'frontend_admin_path' => '',
             'frontend_customer_service_method' => '',
             'frontend_customer_service_id' => '',
+            'frontend_world_fill_color' => '',
+            'frontend_world_marker_color' => '',
             // email
             'email_template' => '',
             'email_host' => '',
@@ -107,19 +68,13 @@ class ConfigSave extends FormRequest
             'email_password' => '',
             'email_encryption' => '',
             'email_from_address' => '',
+            'email_rate_limit' => '',
             // telegram
             'telegram_bot_enable' => 'in:0,1',
             'telegram_bot_token' => '',
             'telegram_discuss_id' => '',
             'telegram_channel_id' => '',
             'telegram_discuss_link' => 'nullable|url',
-            // app
-            'windows_version' => '',
-            'windows_download_url' => '',
-            'macos_version' => '',
-            'macos_download_url' => '',
-            'android_version' => '',
-            'android_download_url' => ''
         ];
     }
 
@@ -130,7 +85,7 @@ class ConfigSave extends FormRequest
             'app_url.url' => '站点URL格式不正确，必须携带http(s)://',
             'subscribe_url.url' => '订阅URL格式不正确，必须携带http(s)://',
             'server_token.min' => '通讯密钥长度必须大于16位',
-            'tos_url.url' => '服务条款URL格式不正确，必须携带http(s)://',
+            'tos_url.url' => '服务条款URL格式不正确',
             'telegram_discuss_link.url' => 'Telegram群组地址必须为URL格式，必须携带http(s)://'
         ];
     }

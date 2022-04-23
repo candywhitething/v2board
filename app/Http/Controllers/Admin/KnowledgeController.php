@@ -2,69 +2,84 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\KnowledgeSave;
 use App\Http\Requests\Admin\KnowledgeSort;
 use App\Models\Knowledge;
+use Exception;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Routing\ResponseFactory;
 use Illuminate\Http\Request;
-use App\Http\Controllers\Controller;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class KnowledgeController extends Controller
 {
+    /**
+     * fetch
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
     public function fetch(Request $request)
     {
-        if ($request->input('id')) {
-            $knowledge = Knowledge::find($request->input('id'))->toArray();
-            if (!$knowledge) abort(500, '知识不存在');
-            return response([
-                'data' => $knowledge
-            ]);
+        $reqId = (int)$request->input('id');
+        if ($reqId > 0) {
+            $knowledge = Knowledge::find($reqId);
+            if ($knowledge === null) {
+                abort(500, '知识不存在');
+            }
+            $data = $knowledge;
+        } else {
+            $data = Knowledge::orderBy(Knowledge::FIELD_SORT, "ASC")->get();
         }
+
         return response([
-            'data' => Knowledge::select(['title', 'id', 'updated_at', 'category', 'show'])
-                ->orderBy('sort', 'ASC')
-                ->get()
+            'data' => $data
         ]);
     }
 
-    public function getCategory(Request $request)
+    /**
+     * get category
+     *
+     * @return ResponseFactory|Response
+     */
+    public function category()
     {
         return response([
-            'data' => array_keys(Knowledge::get()->groupBy('category')->toArray())
+            'data' => array_keys(Knowledge::get()->groupBy(Knowledge::FIELD_CATEGORY)->toArray())
         ]);
     }
 
+    /**
+     * save
+     *
+     * @param KnowledgeSave $request
+     * @return ResponseFactory|Response
+     */
     public function save(KnowledgeSave $request)
     {
-        $params = $request->validated();
+        $reqId = $request->input('id');
+        $reqCategory = $request->input('category');
+        $reqLanguage = $request->input('language');
+        $reqTitle = $request->input('title');
+        $reqBody = $request->input('body');
 
-        if (!$request->input('id')) {
-            if (!Knowledge::create($params)) {
-                abort(500, '创建失败');
-            }
+        if ($reqId === null) {
+            $knowledge = new Knowledge();
         } else {
-            try {
-                Knowledge::find($request->input('id'))->update($params);
-            } catch (\Exception $e) {
-                abort(500, '保存失败');
+            $knowledge = KnowLedge::find($reqId);
+            if ($knowledge === null) {
+                abort(500, '知识不存在');
             }
         }
 
-        return response([
-            'data' => true
-        ]);
-    }
+        $knowledge->setAttribute(Knowledge::FIELD_CATEGORY, $reqCategory);
+        $knowledge->setAttribute(Knowledge::FIELD_LANGUAGE, $reqLanguage);
+        $knowledge->setAttribute(Knowledge::FIELD_TITLE, $reqTitle);
+        $knowledge->setAttribute(Knowledge::FIELD_BODY, $reqBody);
 
-    public function show(Request $request)
-    {
-        if (empty($request->input('id'))) {
-            abort(500, '参数有误');
-        }
-        $knowledge = Knowledge::find($request->input('id'));
-        if (!$knowledge) {
-            abort(500, '知识不存在');
-        }
-        $knowledge->show = $knowledge->show ? 0 : 1;
         if (!$knowledge->save()) {
             abort(500, '保存失败');
         }
@@ -74,38 +89,134 @@ class KnowledgeController extends Controller
         ]);
     }
 
-    public function sort(KnowledgeSort $request)
+
+    /**
+     * show
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
+    public function show(Request $request)
     {
-        DB::beginTransaction();
-        try {
-            foreach ($request->input('knowledge_ids') as $k => $v) {
-                $knowledge = Knowledge::find($v);
-                $knowledge->timestamps = false;
-                $knowledge->update(['sort' => $k + 1]);
-            }
-        } catch (\Exception $e) {
-            DB::rollBack();
+        $reqId = (int)$request->input('id');
+
+        if ($reqId <= 0) {
+            abort(500, '参数有误');
+        }
+
+        /**
+         * @var Knowledge $knowledge
+         */
+        $knowledge = Knowledge::find($reqId);
+        if ($knowledge === null) {
+            abort(500, '知识不存在');
+        }
+        $knowledge->setAttribute(Knowledge::FIELD_SHOW, $knowledge->getAttribute(Knowledge::FIELD_SHOW) ?
+            Knowledge::SHOW_OFF : Knowledge::SHOW_ON);
+        if (!$knowledge->save()) {
             abort(500, '保存失败');
         }
+
+        return response([
+            'data' => true
+        ]);
+    }
+
+
+    /**
+     * free
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
+    public function free(Request $request)
+    {
+        $reqId = (int)$request->input('id');
+        if ($reqId <= 0) {
+            abort(500, '参数有误');
+        }
+
+        /**
+         * @var Knowledge $knowledge
+         */
+        $knowledge = Knowledge::find($reqId);
+        if ($knowledge === null) {
+            abort(500, '知识不存在');
+        }
+
+        $knowledge->setAttribute(Knowledge::FIELD_FREE, $knowledge->getAttribute(Knowledge::FIELD_FREE) ?
+            Knowledge::FREE_OFF : Knowledge::FREE_ON);
+
+        if (!$knowledge->save()) {
+            abort(500, '保存失败');
+        }
+
+        return response([
+            'data' => true
+        ]);
+
+    }
+
+    /**
+     * sort
+     *
+     * @param KnowledgeSort $request
+     * @return ResponseFactory|Response
+     * @throws Throwable
+     */
+    public function sort(KnowledgeSort $request)
+    {
+        $reqIds = (array)$request->input('knowledge_ids');
+        DB::beginTransaction();
+        foreach ($reqIds as $k => $id) {
+            /**
+             * @var Knowledge $knowledge
+             */
+            $knowledge = Knowledge::find($id);
+            if ($knowledge == null) {
+                DB::rollBack();
+                abort(500, '知识数据异常');
+            }
+
+            $knowledge->setAttribute(Knowledge::FIELD_SORT, $k + 1);
+            if (!$knowledge->save()) {
+                DB::rollBack();
+                abort(500, '保存失败');
+            }
+        }
+
         DB::commit();
         return response([
             'data' => true
         ]);
     }
 
+    /**
+     * drop
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
     public function drop(Request $request)
     {
-        if (empty($request->input('id'))) {
+        $reqId = (int)$request->input('id');
+
+        if ($reqId <= 0) {
             abort(500, '参数有误');
         }
-        $knowledge = Knowledge::find($request->input('id'));
-        if (!$knowledge) {
+
+        /**
+         * @var Knowledge $knowledge
+         */
+        $knowledge = Knowledge::find($reqId);
+        if ($knowledge == null) {
             abort(500, '知识不存在');
         }
-        if (!$knowledge->delete()) {
+        try {
+            $knowledge->delete();
+        } catch (Exception $e) {
             abort(500, '删除失败');
         }
-
         return response([
             'data' => true
         ]);

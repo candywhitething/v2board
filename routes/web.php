@@ -39,7 +39,7 @@ Route::get('/' . config('v2board.frontend_admin_path', 'admin'), function () {
         'theme_sidebar' => config('v2board.frontend_theme_sidebar', 'light'),
         'theme_header' => config('v2board.frontend_theme_header', 'dark'),
         'theme_color' => config('v2board.frontend_theme_color', 'default'),
-        'backgroun_url' => config('v2board.frontend_background_url'),
-        'verison' => config('app.version')
+        'background_url' => config('v2board.frontend_background_url'),
+        'version' => config('app.version')
     ]);
 });

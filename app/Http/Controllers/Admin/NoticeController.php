@@ -2,56 +2,55 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Http\Requests\Admin\NoticeSave;
-use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\NoticeSave;
 use App\Models\Notice;
-use Illuminate\Support\Facades\Cache;
+use Exception;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 class NoticeController extends Controller
 {
+    /**
+     * fetch
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
     public function fetch(Request $request)
     {
         return response([
-            'data' => Notice::orderBy('id', 'DESC')->get()
+            'data' => Notice::orderBy('id', "DESC")->get()
         ]);
     }
 
+    /**
+     * save
+     *
+     * @param NoticeSave $request
+     * @return Application|ResponseFactory|Response
+     */
     public function save(NoticeSave $request)
     {
-        $data = $request->only([
-            'title',
-            'content',
-            'img_url'
-        ]);
-        if (!$request->input('id')) {
-            if (!Notice::create($data)) {
-                abort(500, '保存失败');
-            }
+        $reqTitle = $request->input('title');
+        $reqContent = $request->input('content');
+        $reqImgUrl = $request->input('img_url');
+        $reqId = (int)$request->input('id');
+        if ($reqId <= 0) {
+            $notice = new Notice();
         } else {
-            try {
-                Notice::find($request->input('id'))->update($data);
-            } catch (\Exception $e) {
-                abort(500, '保存失败');
+            $notice = Notice::find($reqId);
+            if ($notice === null) {
+                abort(500, '公告不存在');
             }
         }
-        return response([
-            'data' => true
-        ]);
-    }
 
+        $notice->setAttribute(Notice::FIELD_TITLE, $reqTitle);
+        $notice->setAttribute(Notice::FIELD_CONTENT, $reqContent);
+        $notice->setAttribute(Notice::FIELD_IMG_URL, $reqImgUrl);
 
-
-    public function show(Request $request)
-    {
-        if (empty($request->input('id'))) {
-            abort(500, '参数有误');
-        }
-        $notice = Notice::find($request->input('id'));
-        if (!$notice) {
-            abort(500, '公告不存在');
-        }
-        $notice->show = $notice->show ? 0 : 1;
         if (!$notice->save()) {
             abort(500, '保存失败');
         }
@@ -61,15 +60,25 @@ class NoticeController extends Controller
         ]);
     }
 
+
+    /**
+     * drop
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     * @throws Exception
+     */
     public function drop(Request $request)
     {
-        if (empty($request->input('id'))) {
+        $reqId = (int)$request->input('id');
+        if ($reqId <= 0) {
             abort(500, '参数错误');
         }
-        $notice = Notice::find($request->input('id'));
-        if (!$notice) {
+        $notice = Notice::find($reqId);
+        if ($notice === null) {
             abort(500, '公告不存在');
         }
+
         if (!$notice->delete()) {
             abort(500, '删除失败');
         }

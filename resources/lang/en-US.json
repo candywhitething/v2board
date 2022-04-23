@@ -85,6 +85,8 @@
     "Password can not be empty": "Password can not be empty",
     "The traffic usage in :app_name has reached 80%": "The traffic usage in :app_name has reached 80%",
     "The service in :app_name is about to expire": "The service in :app_name is about to expire",
+    "No permission to view": "No permission to view",
     "The coupon can only be used :limit_use_with_user per person": "The coupon can only be used :limit_use_with_user per person",
-    "The coupon code cannot be used for this period": "The coupon code cannot be used for this period"
+    "The coupon code cannot be used for this cycle": "The coupon code cannot be used for this period",
+    "Not eligible to purchase this subscription": "Not eligible to purchase this subscription"
 }

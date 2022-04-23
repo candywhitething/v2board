@@ -3,12 +3,14 @@
 /**
  * 自己写别抄，抄NMB抄
  */
+
 namespace App\Payments;
 
-use \Curl\Curl;
+use Curl\Curl;
 
-class MGate {
-    private $config;
+class MGate
+{
+    protected $config;
 
     public function __construct($config)
     {

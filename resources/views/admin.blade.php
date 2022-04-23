@@ -2,13 +2,28 @@
 <html>
 
 <head>
-    <link rel="stylesheet" href="/assets/admin/components.chunk.css?v={{$verison}}">
-    <link rel="stylesheet" href="/assets/admin/umi.css?v={{$verison}}">
-    <link rel="stylesheet" href="/assets/admin/custom.css?v={{$verison}}">
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no">
+    <meta charset="utf-8"/>
+    <meta
+        name="viewport"
+        content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no"
+    />
+
     <title>{{$title}}</title>
-    <!-- <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Nunito+Sans:300,400,400i,600,700"> -->
+    <link rel="shortcut icon" href="/assets/admin/favicons/favicon-32x32.png"/>
+    <link
+        rel="icon"
+        type="image/png"
+        sizes="192x192"
+        href="/assets/admin/favicons/android-icon-192x192.png"
+    />
+    <link
+        rel="apple-touch-icon"
+        sizes="180x180"
+        href="/assets/admin/favicons/apple-touch-icon-180x180.png"
+    />
+    <link rel="stylesheet" href="/assets/admin/vendors.chunk.css?v={{$version}}"/>
+    <link rel="stylesheet" href="/assets/admin/compoments.chunk.css?v={{$version}}"/>
+    <link rel="stylesheet" href="/assets/admin/custom.css?v={{$version}}">
     <script>window.routerBase = "/";</script>
     <script>
         window.settings = {
@@ -18,19 +33,23 @@
                 header: '{{$theme_header}}',
                 color: '{{$theme_color}}',
             },
-            verison: '{{$verison}}',
-            background_url: '{{$backgroun_url}}'
+            description: "管理后台",
+            version: '{{$version}}',
+            background_url: '{{$background_url}}'
         }
     </script>
 </head>
 
+
 <body>
 <div id="root"></div>
-<script src="/assets/admin/vendors.async.js?v={{$verison}}"></script>
-<script src="/assets/admin/components.async.js?v={{$verison}}"></script>
-<script src="/assets/admin/umi.js?v={{$verison}}"></script>
+<script src="/assets/admin/vendors.js?v={{$version}}"></script>
+<script src="/assets/admin/compoments.js?v={{$version}}"></script>
+<script src="/assets/admin/umi.js?v={{$version}}"></script>
+
 <!-- Global site tag (gtag.js) - Google Analytics -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-P1E9Z5LRRK"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GENK7PBRME"></script>
+
 <script>
     window.dataLayer = window.dataLayer || [];
 
@@ -39,9 +58,7 @@
     }
 
     gtag('js', new Date());
-
-    gtag('config', 'G-P1E9Z5LRRK');
+    gtag('config', 'G-GENK7PBRME');
 </script>
 </body>
-
 </html>

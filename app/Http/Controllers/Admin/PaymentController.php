@@ -2,16 +2,26 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\PaymentSave;
+use App\Http\Requests\Admin\PaymentUpdate;
+use App\Models\Payment;
 use App\Services\PaymentService;
 use App\Utils\Helper;
+use Exception;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Routing\ResponseFactory;
 use Illuminate\Http\Request;
-use App\Http\Controllers\Controller;
-use App\Models\Payment;
+use Illuminate\Http\Response;
 
 class PaymentController extends Controller
 {
-    public function getPaymentMethods()
+    /**
+     * methods
+     *
+     * @return Application|ResponseFactory|Response
+     */
+    public function methods()
     {
         $methods = [];
         foreach (glob(base_path('app//Payments') . '/*.php') as $file) {
@@ -22,74 +32,139 @@ class PaymentController extends Controller
         ]);
     }
 
+    /**
+     * fetch
+     *
+     * @return Application|ResponseFactory|Response
+     */
     public function fetch()
     {
         $payments = Payment::all();
-        foreach ($payments as $k => $v) {
-            $notifyUrl = url("/api/v1/guest/payment/notify/{$v->payment}/{$v->uuid}");
-            if ($v->notify_domain) {
-                $parseUrl = parse_url($notifyUrl);
-                $notifyUrl = $v->notify_domain . $parseUrl['path'];
-            }
-            $payments[$k]['notify_url'] = $notifyUrl;
+        foreach ($payments as $payment) {
+            $payment['notify_url'] = url("/api/v1/guest/payment/notify/{$payment->getAttribute(Payment::FIELD_PAYMENT)}/{$payment->getAttribute(Payment::FIELD_UUID)}");
         }
         return response([
             'data' => $payments
         ]);
     }
 
-    public function getPaymentForm(Request $request)
+    /**
+     * form
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     * @throws Exception
+     */
+    public function form(Request $request)
     {
-        $paymentService = new PaymentService($request->input('payment'), $request->input('id'));
+        $reqPayment = $request->input('payment');
+        $paymentService = new PaymentService($reqPayment);
         return response([
             'data' => $paymentService->form()
         ]);
     }
 
-    public function save(Request $request)
+    /**
+     * save
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
+    public function save(PaymentSave $request)
     {
-        if (!config('v2board.app_url')) {
-            abort(500, '请在站点配置中配置站点地址');
-        }
-        if ($request->input('id')) {
-            $payment = Payment::find($request->input('id'));
-            if (!$payment) abort(500, '支付方式不存在');
-            try {
-                $payment->update($request->input());
-            } catch (\Exception $e) {
-                abort(500, '更新失败');
+        $reqId = (int)$request->input('id');
+        $reqName = $request->input('name');
+        $reqPayment = $request->input('payment');
+        $reqConfig = $request->input('config');
+        $reqIconType = $request->input('icon_type');
+
+        /**
+         * @var Payment $payment
+         */
+        if ($reqId > 0) {
+            $payment = Payment::find($reqId);
+            if (!$payment === null) {
+                abort(500, '支付方式不存在');
             }
-            return response([
-                'data' => true
-            ]);
+        } else {
+            $payment = new Payment();
+            $payment->setAttribute(Payment::FIELD_UUID, Helper::randomChar(8));
         }
-        $params = $request->validate([
-            'name' => 'required',
-            'icon' => 'nullable',
-            'payment' => 'required',
-            'config' => 'required',
-            'notify_domain' => 'nullable|url'
-        ], [
-            'name.required' => '显示名称不能为空',
-            'payment.required' => '网关参数不能为空',
-            'config.required' => '配置参数不能为空',
-            'notify_domain.url' => '自定义通知域名格式有误'
-        ]);
-        $params['uuid'] = Helper::randomChar(8);
-        if (!Payment::create($params)) {
+
+        if ($reqName !== null) {
+            $payment->setAttribute(Payment::FIELD_NAME, $reqName);
+        }
+
+        if ($reqPayment !== null) {
+            $payment->setAttribute(Payment::FIELD_PAYMENT, $reqPayment);
+        }
+
+        if ($reqIconType !== null) {
+            $payment->setAttribute(Payment::FIELD_ICON_TYPE, $reqIconType);
+        }
+
+        if ($reqConfig !== null) {
+            $payment->setAttribute(Payment::FIELD_CONFIG, $reqConfig);
+        }
+
+
+        if (!$payment->save()) {
             abort(500, '保存失败');
         }
+
         return response([
             'data' => true
         ]);
     }
 
+    public function update(PaymentUpdate $request)
+    {
+        $reqId = (int)$request->input('id');
+        $reqEnable = $request->input('enable');
+
+        /**
+         * @var Payment $payment
+         */
+        $payment = Payment::find($reqId);
+        if ($payment === null) {
+            abort(500, '该支付方式不存在');
+        }
+
+        if ($reqEnable !== null) {
+            $payment->setAttribute(Payment::FIELD_ENABLE, (int)$reqEnable);
+        }
+
+        if (!$payment->save()) {
+            abort(500, '保存失败');
+        }
+
+        return response([
+            'data' => true
+        ]);
+    }
+
+    /**
+     * drop
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
     public function drop(Request $request)
     {
-        $payment = Payment::find($request->input('id'));
-        if (!$payment) abort(500, '支付方式不存在');
+        $reqId = $request->input('id');
+        $payment = Payment::find($reqId);
+        if ($payment === null) {
+            abort(500, '支付方式不存在');
+        }
+
+        try {
+            $payment->delete();
+        } catch (Exception $e) {
+            abort(500, "删除失败");
+        }
+
         return response([
-            'data' => $payment->delete()
+            'data' => true
         ]);
     }
 }

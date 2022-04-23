@@ -3,64 +3,101 @@
 namespace App\Services;
 
 
+use App\Models\Order;
 use App\Models\Payment;
 
 class PaymentService
 {
-    public $method;
-    protected $class;
-    protected $config;
-    protected $payment;
+    /**
+     * @var string
+     */
+    public $customResult;
+    /**
+     * @var array
+     */
+    private $_config;
+    /**
+     * @var string
+     */
+    private $_method;
+    /**
+     * @var mixed
+     */
+    private $_paymentInstance;
 
-    public function __construct($method, $id = NULL, $uuid = NULL)
-    {
-        $this->method = $method;
-        $this->class = '\\App\\Payments\\' . $this->method;
-        if (!class_exists($this->class)) abort(500, 'gate is not found');
-        if ($id) $payment = Payment::find($id)->toArray();
-        if ($uuid) $payment = Payment::where('uuid', $uuid)->first()->toArray();
-        $this->config = [];
-        if (isset($payment)) {
-            $this->config = $payment['config'];
-            $this->config['enable'] = $payment['enable'];
-            $this->config['id'] = $payment['id'];
-            $this->config['uuid'] = $payment['uuid'];
-            $this->config['notify_domain'] = $payment['notify_domain'];
-        };
-        $this->payment = new $this->class($this->config);
-    }
 
-    public function notify($params)
+    /**
+     * PaymentService constructor.
+     * @param $method
+     * @param Payment|null $payment
+     * @throws \Exception
+     */
+    public function __construct($method, Payment $payment = null)
     {
-        if (!$this->config['enable']) abort(500, 'gate is not enable');
-        return $this->payment->notify($params);
-    }
-
-    public function pay($order)
-    {
-        // custom notify domain name
-        $notifyUrl = url("/api/v1/guest/payment/notify/{$this->method}/{$this->config['uuid']}");
-        if ($this->config['notify_domain']) {
-            $parseUrl = parse_url($notifyUrl);
-            $notifyUrl = $this->config['notify_domain'] . $parseUrl['path'];
+        $this->_method = $method;
+        $className = '\\App\\Payments\\' . $this->_method;
+        if (!class_exists($className)) {
+            throw new \Exception("gate is not found");
         }
 
-        return $this->payment->pay([
-            'notify_url' => $notifyUrl,
-            'return_url' => config('v2board.app_url', env('APP_URL')) . '/#/order/' . $order['trade_no'],
-            'trade_no' => $order['trade_no'],
-            'total_amount' => $order['total_amount'],
-            'user_id' => $order['user_id'],
-            'stripe_token' => $order['stripe_token']
+        $this->_config = [];
+        if (isset($payment)) {
+            $this->_config = $payment->getAttribute(Payment::FIELD_CONFIG);
+            $this->_config['enable'] = $payment->getAttribute(Payment::FIELD_ENABLE);
+            $this->_config['id'] = $payment->getAttribute(Payment::FIELD_ID);
+            $this->_config['uuid'] = $payment->getAttribute(Payment::FIELD_UUID);
+        };
+        $this->_paymentInstance = new $className($this->_config);
+
+        if (isset($this->payment->customResult)) {
+            $this->customResult = $this->payment->customResult;
+        }
+
+    }
+
+    /**
+     * notify
+     *
+     * @param $params
+     * @return mixed
+     * @throws \Exception
+     */
+    public function notify($params)
+    {
+        if (!$this->_config['enable']) {
+            throw new \Exception('gate is not enable');
+        }
+        return $this->_paymentInstance->notify($params);
+    }
+
+    /**
+     * pay
+     *
+     * @param Order $order
+     * @param string $stripeToken
+     *
+     * @return mixed
+     */
+    public function pay(Order $order, string $stripeToken = "")
+    {
+        return $this->_paymentInstance->pay([
+            'notify_url' => url("/api/v1/guest/payment/notify/{$this->_method}/{$this->_config['uuid']}"),
+            'return_url' => config('v2board.app_url', env('APP_URL')) . '/#/order/' . $order->getAttribute(Order::FIELD_TRADE_NO),
+            'trade_no' => $order->getAttribute(Order::FIELD_TRADE_NO),
+            'total_amount' => $order->getAttribute(Order::FIELD_TOTAL_AMOUNT),
+            'user_id' => $order->getAttribute(Order::FIELD_USER_ID),
+            'stripe_token' => $stripeToken
         ]);
     }
 
     public function form()
     {
-        $form = $this->payment->form();
+        $form = $this->_paymentInstance->form();
         $keys = array_keys($form);
         foreach ($keys as $key) {
-            if (isset($this->config[$key])) $form[$key]['value'] = $this->config[$key];
+            if (isset($this->_config[$key])) {
+                $form[$key]['value'] = $this->_config[$key];
+            }
         }
         return $form;
     }

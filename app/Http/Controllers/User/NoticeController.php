@@ -3,23 +3,29 @@
 namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Models\Notice;
-use App\Utils\Helper;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 class NoticeController extends Controller
 {
+    /**
+     * fetch
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
     public function fetch(Request $request)
     {
-        $current = $request->input('current') ? $request->input('current') : 1;
-        $pageSize = 5;
-        $model = Notice::orderBy('created_at', 'DESC')
-            ->where('show', 1);
-        $total = $model->count();
-        $res = $model->forPage($current, $pageSize)
-            ->get();
+        $reqCurrent = $request->input('current') ? $request->input('current') : 1;
+        $reqPageSize = 5;
+        $notices = Notice::orderBy('created_at', "DESC");
+        $total = $notices->count();
+        $data = $notices->forPage($reqCurrent, $reqPageSize)->get();
         return response([
-            'data' => $res,
+            'data' => $data,
             'total' => $total
         ]);
     }

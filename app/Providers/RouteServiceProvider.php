@@ -2,7 +2,10 @@
 
 namespace App\Providers;
 
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Support\Providers\RouteServiceProvider as ServiceProvider;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 
 class RouteServiceProvider extends ServiceProvider
@@ -24,7 +27,7 @@ class RouteServiceProvider extends ServiceProvider
     public function boot()
     {
         //
-
+        $this->configureRateLimiting();
         parent::boot();
     }
 
@@ -72,6 +75,22 @@ class RouteServiceProvider extends ServiceProvider
             foreach (glob(app_path('Http//Routes') . '/*.php') as $file) {
                 $this->app->make('App\\Http\\Routes\\' . basename($file, '.php'))->map($router);
             }
+        });
+    }
+
+    /**
+     * Configure the rate limiters for the application.
+     *
+     * @return void
+     */
+    protected function configureRateLimiting()
+    {
+        /**
+         * @var Request $request
+         */
+        RateLimiter::for('subscribe', function (Request $request) {
+            $configRateLimitPerMinute = config('v2board.rate_limit_per_minute', 10);
+            return Limit::perMinute($configRateLimitPerMinute)->by($request->ip());
         });
     }
 }

@@ -2,56 +2,62 @@
 
 namespace App\Http\Controllers\Server;
 
-use App\Services\ServerService;
-use App\Services\UserService;
-use App\Utils\CacheKey;
-use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
-use App\Models\User;
+use App\Jobs\TrafficFetchJob;
+use App\Jobs\TrafficServerLogJob;
+use App\Jobs\TrafficUserLogJob;
 use App\Models\ServerTrojan;
-use App\Models\ServerLog;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Cache;
+use App\Models\User;
+use App\Utils\CacheKey;
+use Exception;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Redis;
 
 /*
  * Tidal Lab Trojan
  * Github: https://github.com/tokumeikoi/tidalab-trojan
  */
+
 class TrojanTidalabController extends Controller
 {
-    public function __construct(Request $request)
-    {
-        $token = $request->input('token');
-        if (empty($token)) {
-            abort(500, 'token is null');
-        }
-        if ($token !== config('v2board.server_token')) {
-            abort(500, 'token is error');
-        }
-    }
-
-    // 后端获取用户
+    /**
+     * user
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
     public function user(Request $request)
     {
-        ini_set('memory_limit', -1);
-        $nodeId = $request->input('node_id');
-        $server = ServerTrojan::find($nodeId);
-        if (!$server) {
+        $reqNodeId = $request->input('node_id');
+        $server = ServerTrojan::find($reqNodeId);
+        $clientIP = $request->getClientIp();
+
+        /**
+         * @var ServerTrojan $server
+         */
+        if ($server === null) {
             abort(500, 'fail');
         }
-        Cache::put(CacheKey::get('SERVER_TROJAN_LAST_CHECK_AT', $server->id), time(), 3600);
-        $serverService = new ServerService();
-        $users = $serverService->getAvailableUsers($server->group_id);
+
         $result = [];
+        $users = $server->findAvailableUsers();
         foreach ($users as $user) {
-            $user->trojan_user = [
-                "password" => $user->uuid,
-            ];
+            /**
+             * @var User $user
+             */
+            $user->setAttribute("trojan_user", [
+                "password" => $user->getAttribute(User::FIELD_UUID),
+            ]);
             unset($user['uuid']);
             unset($user['email']);
             array_push($result, $user);
         }
+        Redis::hset(CacheKey::get(CacheKey::SERVER_TROJAN_LAST_CHECK_AT, $server->getKey()), $clientIP, time());
+        Redis::hset(CacheKey::SERVER_TROJAN_LAST_CHECK_AT, $server->getKey(), time());
+
         return response([
             'msg' => 'ok',
             'data' => $result,
@@ -62,8 +68,14 @@ class TrojanTidalabController extends Controller
     public function submit(Request $request)
     {
         // Log::info('serverSubmitData:' . $request->input('node_id') . ':' . file_get_contents('php://input'));
-        $server = ServerTrojan::find($request->input('node_id'));
-        if (!$server) {
+        $reqNodeId = $request->input('node_id');
+        $server = ServerTrojan::find($reqNodeId);
+        $clientIP = $request->getClientIp();
+
+        /**
+         * @var ServerTrojan $server
+         */
+        if ($server === null) {
             return response([
                 'ret' => 0,
                 'msg' => 'server is not found'
@@ -71,36 +83,59 @@ class TrojanTidalabController extends Controller
         }
         $data = file_get_contents('php://input');
         $data = json_decode($data, true);
-        Cache::put(CacheKey::get('SERVER_TROJAN_ONLINE_USER', $server->id), count($data), 3600);
-        Cache::put(CacheKey::get('SERVER_TROJAN_LAST_PUSH_AT', $server->id), time(), 3600);
-        $userService = new UserService();
-        foreach ($data as $item) {
-            $u = $item['u'] * $server->rate;
-            $d = $item['d'] * $server->rate;
-            $userService->trafficFetch($u, $d, $item['user_id'], $server, 'trojan');
+
+        if ($data === null || !is_array($data)) {
+            return response([
+                'ret' => 0,
+                'msg' => 'params error'
+            ]);
         }
 
+        foreach ($data as $item) {
+            $rate = $server->getAttribute(ServerTrojan::FIELD_RATE);
+            $u = $item[User::FIELD_U] * $rate;
+            $d = $item[User::FIELD_D] * $rate;
+            $userId = $item['user_id'];
+            TrafficFetchJob::dispatch($u, $d, $userId);
+            TrafficServerLogJob::dispatch($item[User::FIELD_U], $item[User::FIELD_D], $server->getKey(), ServerTrojan::TYPE);
+            TrafficUserLogJob::dispatch($u, $d, $userId);
+        }
+
+        Redis::hset(CacheKey::get(CacheKey::SERVER_TROJAN_LAST_PUSH_AT, $server->getKey()), $clientIP, time());
+        Redis::hset(CacheKey::SERVER_TROJAN_LAST_PUSH_AT, $server->getKey(), time());
+        Redis::hset(CacheKey::get(CacheKey::SERVER_TROJAN_ONLINE_USER, $server->getKey()),
+            $clientIP, json_encode(['time' => time(), 'count' => count($data)]));
         return response([
             'ret' => 1,
             'msg' => 'ok'
         ]);
     }
 
-    // 后端获取配置
+    /**
+     * config
+     *
+     * @param Request $request
+     */
     public function config(Request $request)
     {
-        $nodeId = $request->input('node_id');
-        $localPort = $request->input('local_port');
-        if (empty($nodeId) || empty($localPort)) {
-            abort(500, '参数错误');
+        $reqNodeId = $request->input('node_id');
+        $reqLocalPort = $request->input('local_port');
+        if (empty($reqNodeId) || empty($reqLocalPort)) {
+            abort(500, 'parameter error');
         }
-        $serverService = new ServerService();
-        try {
-            $json = $serverService->getTrojanConfig($nodeId, $localPort);
-        } catch (\Exception $e) {
-            abort(500, $e->getMessage());
+        /**
+         * @var ServerTrojan $server
+         */
+        $server = ServerTrojan::find($reqNodeId);
+        if ($server === null) {
+            abort(500, 'server not found');
         }
 
-        die(json_encode($json, JSON_UNESCAPED_UNICODE));
+        try {
+            $json = $server->config($reqLocalPort);
+            die(json_encode($json, JSON_UNESCAPED_UNICODE));
+        } catch (Exception $e) {
+            abort(500, $e->getMessage());
+        }
     }
 }

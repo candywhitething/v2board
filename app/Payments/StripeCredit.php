@@ -3,12 +3,13 @@
 /**
  * 自己写别抄，抄NMB抄
  */
+
 namespace App\Payments;
 
-use Stripe\Source;
 use Stripe\Stripe;
 
-class StripeCredit {
+class StripeCredit
+{
     public function __construct($config)
     {
         $this->config = $config;
@@ -46,7 +47,7 @@ class StripeCredit {
         $currency = $this->config['currency'];
         $exchange = $this->exchange('CNY', strtoupper($currency));
         if (!$exchange) {
-            abort(500, __('Currency conversion has timed out, please try again later'));
+            abort(500, "Currency conversion has timed out, please try again later");
         }
         Stripe::setApiKey($this->config['stripe_sk_live']);
         try {
@@ -62,10 +63,10 @@ class StripeCredit {
             ]);
         } catch (\Exception $e) {
             info($e);
-            abort(500, __('Payment failed. Please check your credit card information'));
+            abort(500, "Payment failed. Please check your credit card informatio");
         }
         if (!$charge->paid) {
-            abort(500, __('Payment failed. Please check your credit card information'));
+            abort(500, "Payment failed. Please check your credit card informatio");
         }
         return [
             'type' => 2,

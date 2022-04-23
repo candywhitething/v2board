@@ -3,12 +3,10 @@
 namespace App\Console\Commands;
 
 use App\Jobs\OrderHandleJob;
-use App\Services\OrderService;
-use Illuminate\Console\Command;
 use App\Models\Order;
-use App\Models\User;
-use App\Models\Plan;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Console\Command;
+use Symfony\Component\Console\Output\ConsoleOutput;
+
 
 class CheckOrder extends Command
 {
@@ -27,28 +25,36 @@ class CheckOrder extends Command
     protected $description = '订单检查任务';
 
     /**
+     * @var ConsoleOutput $_out
+     */
+    private $_out;
+
+    /**
      * Create a new command instance.
      *
      * @return void
      */
     public function __construct()
     {
+        $this->_out = new ConsoleOutput();
         parent::__construct();
     }
+
 
     /**
      * Execute the console command.
      *
-     * @return mixed
+     * @return void
      */
     public function handle()
     {
-        ini_set('memory_limit', -1);
-        $orders = Order::whereIn('status', [0, 1])
-            ->orderBy('created_at', 'ASC')
-            ->get();
+        $orders = Order::whereIn(Order::FIELD_STATUS, [Order::STATUS_UNPAID, Order::STATUS_PENDING])->get();
         foreach ($orders as $order) {
-            OrderHandleJob::dispatch($order->trade_no);
+            /**
+             * @var Order $order
+             */
+            OrderHandleJob::dispatch($order->getAttribute(Order::FIELD_TRADE_NO));
         }
+        $this->_out->writeln("orders count: " . count($orders));
     }
 }

@@ -2,48 +2,135 @@
 
 namespace App\Http\Controllers\Guest;
 
-use App\Models\Order;
-use App\Services\OrderService;
-use App\Services\PaymentService;
-use App\Services\TelegramService;
-use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
+use App\Jobs\SendEmailJob;
+use App\Jobs\SendTelegramJob;
+use App\Models\Order;
+use App\Models\Payment;
+use App\Models\User;
+use App\Services\PaymentService;
+use Exception;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class PaymentController extends Controller
 {
+    /**
+     * @throws Exception
+     */
     public function notify($method, $uuid, Request $request)
     {
         try {
-            $paymentService = new PaymentService($method, null, $uuid);
-            $verify = $paymentService->notify($request->input());
-            if (!$verify) abort(500, 'verify error');
-            if (!$this->handle($verify['trade_no'], $verify['callback_no'])) {
-                abort(500, 'handle error');
+
+            $payment = Payment::findByUUID($uuid);
+            if ($payment === null) {
+                throw new Exception("payment not found");
             }
-            die(isset($verify['custom_result']) ? $verify['custom_result'] : 'success');
-        } catch (\Exception $e) {
-            abort(500, 'fail');
+
+            $paymentService = new PaymentService($method, $payment);
+            $verify = $paymentService->notify($request->input());
+            if (!$verify) {
+                throw new Exception("verify error");
+            }
+
+            $tradeNo = $verify['trade_no'];
+            $callbackNo = $verify['callback_no'];
+            /**
+             * @var Order $order
+             */
+            $order = Order::findByTradeNo($tradeNo);
+            if ($order === null) {
+                throw new Exception("order not found");
+            }
+
+            /**
+             * @var User $user
+             */
+            $user = $order->user();
+            if ($user === null) {
+                throw new Exception("user not found");
+            }
+
+
+            if ($order->getAttribute(Order::FIELD_STATUS) !== Order::STATUS_UNPAID) {
+                Log::error("invalid order status", ['order' => $order->toArray(), "verify" => $verify]);
+                throw new Exception("invalid order status");
+            }
+
+            $order->setAttribute(Order::FIELD_PAID_AT, time());
+            $order->setAttribute(Order::FIELD_STATUS, Order::STATUS_PENDING);
+            $order->setAttribute(Order::FIELD_CALLBACK_NO, $callbackNo);
+
+            if (!$order->save()) {
+                throw new Exception("order save failed");
+            }
+
+            $this->_notifyAdmin($order, $user);
+            $this->_notifyUser($order, $user);
+        } catch (Exception $e) {
+            Log::error($e);
+            abort(500, 'fail: ' . $e->getMessage());
         }
+
+        die($paymentService->customResult ?? 'success');
     }
 
-    private function handle($tradeNo, $callbackNo)
+    /**
+     * 通知管理员
+     *
+     * @param Order $order
+     * @param User $user
+     *
+     * @return void
+     */
+    private function _notifyAdmin(Order $order, User $user): void
     {
-        $order = Order::where('trade_no', $tradeNo)->first();
-        if (!$order) {
-            abort(500, 'order is not found');
-        }
-        if ($order->status === 1) return true;
-        $orderService = new OrderService($order);
-        if (!$orderService->paid($callbackNo)) {
-            return false;
-        }
-        $telegramService = new TelegramService();
+        //通知
         $message = sprintf(
-            "💰成功收款%s元\n———————————————\n订单号：%s",
-            $order->total_amount / 100,
-            $order->trade_no
+            "💰成功收款%s元\n———————————————\n订单号：%s\n———————————————\n用户邮箱：%s\n",
+            $order->getAttribute(Order::FIELD_TOTAL_AMOUNT) / 100,
+            $order->getAttribute(Order::FIELD_TRADE_NO),
+            $user->getAttribute(User::FIELD_EMAIL)
         );
-        $telegramService->sendMessageWithAdmin($message);
-        return true;
+        SendTelegramJob::generateJobWithAdminMessages($message);
+    }
+
+    /**
+     * 通知用户
+     *
+     * @param Order $order
+     * @param User $user
+     *
+     * @return void
+     */
+    private function _notifyUser(Order $order, User $user): void
+    {
+        $content = sprintf(
+            "✨恭喜您成功付款%s元，我们将在1-3分钟为您开通订阅。订单号:%s",
+            $order->getAttribute(Order::FIELD_TOTAL_AMOUNT) / 100,
+            $order->getAttribute(Order::FIELD_TRADE_NO)
+        );
+        $subject = config('v2board.app_name', 'V2Board') . "成功付款提醒";
+        SendEmailJob::dispatch([
+            'email' => $user->getAttribute(User::FIELD_EMAIL),
+            'subject' => $subject,
+            'template_name' => 'notify',
+            'template_value' => [
+                'name' => config('v2board.app_name', 'V2Board'),
+                'url' => config('v2board.app_url'),
+                'content' => $content
+            ]
+        ]);
+
+        $telegramId = (int)$user->getAttribute(User::FIELD_TELEGRAM_ID);
+        if ($telegramId === 0) {
+            return;
+        }
+        $message = sprintf(
+            "✨恭喜您成功付款%s元，我们将在1-3分钟为您开通订阅。\n———————————————\n订单号：%s",
+            $order->getAttribute(Order::FIELD_TOTAL_AMOUNT) / 100,
+            $order->getAttribute(Order::FIELD_TRADE_NO)
+        );
+        SendTelegramJob::dispatch($telegramId, $message);
     }
 }

@@ -2,90 +2,155 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Jobs\SendEmailJob;
-use App\Services\TicketService;
-use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use App\Models\Ticket;
-use App\Models\User;
 use App\Models\TicketMessage;
-use Illuminate\Support\Facades\Cache;
+use App\Services\NoticeService;
+use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 
 class TicketController extends Controller
 {
+
+    /**
+     * fetch
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
     public function fetch(Request $request)
     {
-        if ($request->input('id')) {
-            $ticket = Ticket::where('id', $request->input('id'))
-                ->first();
-            if (!$ticket) {
+        $reqId = (int)$request->input("id");
+        $sessionId = $request->session()->get('id');
+
+        if ($reqId > 0) {
+            /**
+             * @var Ticket $ticket
+             */
+            $ticket = Ticket::find($reqId);
+            if ($ticket === null) {
                 abort(500, '工单不存在');
             }
-            $ticket['message'] = TicketMessage::where('ticket_id', $ticket->id)->get();
-            for ($i = 0; $i < count($ticket['message']); $i++) {
-                if ($ticket['message'][$i]['user_id'] !== $ticket->user_id) {
-                    $ticket['message'][$i]['is_me'] = true;
+
+            $ticketMessages = $ticket->messages()->get();
+            foreach ($ticketMessages as $message) {
+                if ($message->getAttribute(TicketMessage::FIELD_USER_ID) == $sessionId) {
+                    $message->setAttribute("is_me", true);
                 } else {
-                    $ticket['message'][$i]['is_me'] = false;
+                    $message->setAttribute("is_me", false);
                 }
             }
-            return response([
+            $ticket->setAttribute("message", $ticketMessages);
+            $data = [
                 'data' => $ticket
-            ]);
-        }
-        $current = $request->input('current') ? $request->input('current') : 1;
-        $pageSize = $request->input('pageSize') >= 10 ? $request->input('pageSize') : 10;
-        $model = Ticket::orderBy('created_at', 'DESC');
-        if ($request->input('status') !== NULL) {
-            $model->where('status', $request->input('status'));
-        }
-        $total = $model->count();
-        $res = $model->forPage($current, $pageSize)
-            ->get();
-        for ($i = 0; $i < count($res); $i++) {
-            if ($res[$i]['last_reply_user_id'] == $request->session()->get('id')) {
-                $res[$i]['reply_status'] = 0;
-            } else {
-                $res[$i]['reply_status'] = 1;
+            ];
+        } else {
+            $reqCurrent = $request->input('current') ?: 1;
+            $reqPageSize = $request->input('pageSize') ?: 10;
+            $reqStatus = $request->input('status');
+
+            $models = Ticket::orderBy(Ticket::FIELD_CREATED_AT, "DESC");
+            if ($reqStatus != null) {
+                $models->where(Ticket::FIELD_STATUS, (int)$reqStatus);
             }
+            $total = $models->count();
+            $tickets = $models->forPage($reqCurrent, $reqPageSize)->get();
+            foreach ($tickets as $ticket) {
+                /**
+                 * @var Ticket $ticket
+                 */
+                $lastReplyUserId = $ticket->getAttribute(Ticket::FIELD_LAST_REPLY_USER_ID);
+                if ($lastReplyUserId == $sessionId) {
+                    $ticket->setAttribute("reply_status", 0);
+                } else {
+                    $ticket->setAttribute("reply_status", 1);
+                }
+            }
+
+            $data = [
+                'data' => $tickets,
+                'total' => $total
+            ];
         }
-        return response([
-            'data' => $res,
-            'total' => $total
-        ]);
+        return response($data);
+
     }
 
+    /**
+     * reply
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
     public function reply(Request $request)
     {
-        if (empty($request->input('id'))) {
+        $sessionId = $request->session()->get('id');
+        $reqId = (int)$request->input('id');
+        $reqMessage = (string)$request->input('message');
+
+        if ($reqId <= 0) {
             abort(500, '参数错误');
         }
-        if (empty($request->input('message'))) {
+
+        if (empty($reqMessage)) {
             abort(500, '消息不能为空');
         }
-        $ticketService = new TicketService();
-        $ticketService->replyByAdmin(
-            $request->input('id'),
-            $request->input('message'),
-            $request->session()->get('id')
-        );
+
+        /**
+         * @var Ticket $ticket
+         */
+        $ticket = Ticket::find($reqId);
+        if ($ticket === null) {
+            abort(500, '工单不存在');
+        }
+
+        if ($ticket->isClosed()) {
+            abort(500, '工单已关闭，无法回复');
+        }
+        DB::beginTransaction();
+        $ticketMessage = new TicketMessage();
+        $ticketMessage->setAttribute(TicketMessage::FIELD_USER_ID, $sessionId);
+        $ticketMessage->setAttribute(TicketMessage::FIELD_TICKET_ID, $reqId);
+        $ticketMessage->setAttribute(TicketMessage::FIELD_MESSAGE, $reqMessage);
+        $ticket->setAttribute(Ticket::FIELD_LAST_REPLY_USER_ID, $sessionId);
+
+        if (!$ticketMessage->save() || !$ticket->save()) {
+            DB::rollback();
+            abort(500, '工单回复失败');
+        }
+        DB::commit();
+        NoticeService::sendEmailNotify($ticket, $ticketMessage);
+
         return response([
             'data' => true
         ]);
     }
 
+    /**
+     * close
+     *
+     * @param Request $request
+     * @return ResponseFactory|Response
+     */
     public function close(Request $request)
     {
-        if (empty($request->input('id'))) {
+        $reqId = (int)$request->input('id');
+        if ($reqId <= 0) {
             abort(500, '参数错误');
         }
-        $ticket = Ticket::where('id', $request->input('id'))
-            ->first();
-        if (!$ticket) {
+
+        /**
+         * @var Ticket $ticket
+         */
+        $ticket = Ticket::find($reqId);
+        if ($ticket === null) {
             abort(500, '工单不存在');
         }
-        $ticket->status = 1;
+
+        $ticket->setAttribute(Ticket::FIELD_STATUS, Ticket::STATUS_CLOSE);
+
         if (!$ticket->save()) {
             abort(500, '关闭失败');
         }
@@ -93,4 +158,5 @@ class TicketController extends Controller
             'data' => true
         ]);
     }
+
 }

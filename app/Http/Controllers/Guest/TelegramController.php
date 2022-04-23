@@ -2,73 +2,60 @@
 
 namespace App\Http\Controllers\Guest;
 
-use App\Services\TelegramService;
-use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
+use App\Utils\Telegram\Commands\BindCommand;
+use App\Utils\Telegram\Commands\HelpCommand;
+use App\Utils\Telegram\Commands\LatestURLCommand;
+use App\Utils\Telegram\Commands\ReplyTicketCommand;
+use App\Utils\Telegram\Commands\SubLinkCommand;
+use App\Utils\Telegram\Commands\TrafficCommand;
+use App\Utils\Telegram\Commands\UnbindCommand;
+use Illuminate\Http\Request;
+use Telegram\Bot\Api;
+use Telegram\Bot\Exceptions\TelegramSDKException;
 
 class TelegramController extends Controller
 {
-    protected $msg;
-    protected $commands = [];
-
+    /**
+     * TelegramController constructor.
+     * @param Request $request
+     */
     public function __construct(Request $request)
     {
         if ($request->input('access_token') !== md5(config('v2board.telegram_bot_token'))) {
-            abort(401);
+            abort(401, 'authentication failed');
         }
     }
 
-    public function webhook(Request $request)
+    /**
+     * @return string
+     * @throws TelegramSDKException
+     */
+    public function webhook(): string
     {
-        $this->msg = $this->getMessage($request->input());
-        if (!$this->msg) return;
-        $this->handle();
-    }
+        $token = config('v2board.telegram_bot_token');
+        $telegram = new Api($token, false);
 
-    public function handle()
-    {
-        $msg = $this->msg;
-        try {
-            foreach (glob(base_path('app//Plugins//Telegram//Commands') . '/*.php') as $file) {
-                $command = basename($file, '.php');
-                $class = '\\App\\Plugins\\Telegram\\Commands\\' . $command;
-                if (!class_exists($class)) continue;
-                $instance = new $class();
-                if ($msg->message_type === 'message') {
-                    if (!isset($instance->command)) continue;
-                    if ($msg->command !== $instance->command) continue;
-                    $instance->handle($msg);
-                    return;
-                }
-                if ($msg->message_type === 'reply_message') {
-                    if (!isset($instance->regex)) continue;
-                    if (!preg_match($instance->regex, $msg->reply_text, $match)) continue;
-                    $instance->handle($msg, $match);
-                    return;
-                }
+        $update = $telegram->getWebhookUpdate();
+
+        if ($update->getMessage()->isNotEmpty()) {
+            if ($update->getMessage()->replyToMessage) {
+                $telegram->addCommands([
+                    ReplyTicketCommand::class
+                ]);
+                $telegram->triggerCommand('replyTicket', $update);
+            } else {
+                $telegram->addCommands([
+                    HelpCommand::class,
+                    BindCommand::class,
+                    TrafficCommand::class,
+                    LatestURLCommand::class,
+                    SubLinkCommand::class,
+                    UnbindCommand::class,
+                ]);
+                $telegram->commandsHandler(true);
             }
-        } catch (\Exception $e) {
-            $telegramService = new TelegramService();
-            $telegramService->sendMessage($msg->chat_id, $e->getMessage());
         }
-    }
-
-    private function getMessage(array $data)
-    {
-        if (!isset($data['message'])) return false;
-        $obj = new \StdClass();
-        if (!isset($data['message']['text'])) return false;
-        $text = explode(' ', $data['message']['text']);
-        $obj->command = $text[0];
-        $obj->args = array_slice($text, 1);
-        $obj->chat_id = $data['message']['chat']['id'];
-        $obj->message_id = $data['message']['message_id'];
-        $obj->message_type = !isset($data['message']['reply_to_message']['text']) ? 'message' : 'reply_message';
-        $obj->text = $data['message']['text'];
-        $obj->is_private = $data['message']['chat']['type'] === 'private';
-        if ($obj->message_type === 'reply_message') {
-            $obj->reply_text = $data['message']['reply_to_message']['text'];
-        }
-        return $obj;
+        return "ok";
     }
 }

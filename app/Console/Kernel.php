@@ -2,10 +2,8 @@
 
 namespace App\Console;
 
-use App\Utils\CacheKey;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
-use Illuminate\Support\Facades\Cache;
 
 class Kernel extends ConsoleKernel
 {
@@ -26,19 +24,26 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule)
     {
-        Cache::put(CacheKey::get('SCHEDULE_LAST_CHECK_AT', null), time());
         // v2board
-        $schedule->command('v2board:statistics')->dailyAt('0:10');
+        $schedule->command('v2board:statistics')->dailyAt('00:10');
         // check
         $schedule->command('check:order')->everyMinute();
         $schedule->command('check:commission')->everyMinute();
-        $schedule->command('check:ticket')->everyMinute();
+        $schedule->command('check:server')->everyMinute();
+        $schedule->command('check:email')->everyThirtyMinutes();
+
+        if (config('app.locale') === 'zh-CN') {
+            $schedule->command('check:server_gfw')->hourly();
+        }
         // reset
-        $schedule->command('reset:traffic')->daily();
+        $schedule->command('reset:traffic')->dailyAt('00:01');
         // send
         $schedule->command('send:remindMail')->dailyAt('11:30');
         // horizon metrics
         $schedule->command('horizon:snapshot')->everyFiveMinutes();
+        // backup db
+        $schedule->command('backup:clean --disable-notifications')->daily()->at('04:10');
+        $schedule->command('backup:run --only-db --disable-notifications')->daily()->at('04:30');
     }
 
     /**

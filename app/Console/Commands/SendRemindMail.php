@@ -2,11 +2,10 @@
 
 namespace App\Console\Commands;
 
-use App\Services\MailService;
-use Illuminate\Console\Command;
 use App\Models\User;
-use App\Models\MailLog;
-use App\Jobs\SendEmailJob;
+use App\Services\NoticeService;
+use Illuminate\Console\Command;
+use Symfony\Component\Console\Output\ConsoleOutput;
 
 class SendRemindMail extends Command
 {
@@ -23,6 +22,14 @@ class SendRemindMail extends Command
      * @var string
      */
     protected $description = '发送提醒邮件';
+    /**
+     * @var ConsoleOutput
+     */
+    private $_out;
+    /**
+     * @var int
+     */
+    private $_sendCount;
 
     /**
      * Create a new command instance.
@@ -31,20 +38,32 @@ class SendRemindMail extends Command
      */
     public function __construct()
     {
+        $this->_out = new ConsoleOutput();
         parent::__construct();
     }
 
     /**
      * Execute the console command.
      *
-     * @return mixed
+     * @return void
      */
     public function handle()
     {
         $users = User::all();
-        $mailService = new MailService();
+        $this->_out->writeln("users count: " . count($users));
+        $this->_sendCount = 0;
         foreach ($users as $user) {
-            if ($user->remind_expire) $mailService->remindExpire($user);
+            /**
+             * @var User $user
+             */
+            if ($user->getAttribute(User::FIELD_REMIND_EXPIRE)) {
+                NoticeService::remindExpire($user);
+                $this->_sendCount++;
+            }
         }
+
+        $this->_out->writeln("send count: " . $this->_sendCount);
     }
+
+
 }

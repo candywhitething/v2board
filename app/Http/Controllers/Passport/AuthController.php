@@ -3,44 +3,64 @@
 namespace App\Http\Controllers\Passport;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Passport\AuthRegister;
 use App\Http\Requests\Passport\AuthForget;
 use App\Http\Requests\Passport\AuthLogin;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
+use App\Http\Requests\Passport\AuthRegister;
+use App\Models\InviteCode;
 use App\Models\Plan;
 use App\Models\User;
-use App\Models\InviteCode;
-use App\Utils\Helper;
-use App\Utils\Dict;
 use App\Utils\CacheKey;
+use App\Utils\Dict;
+use App\Utils\Helper;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Cache;
 use ReCaptcha\ReCaptcha;
 
 class AuthController extends Controller
 {
-    public function register(AuthRegister $request)
+    /**
+     * register
+     *
+     * @param AuthRegister $request
+     * @return JsonResponse
+     */
+    public function register(AuthRegister $request): JsonResponse
     {
+        $reqRecaptchaData = $request->input('recaptcha_data');
+        $reqEmail = $request->input('email');
+        $reqEmailCode = $request->input('email_code');
+        $reqPassword = $request->input('password');
+        $reqInviteCode = $request->input('invite_code');
+
         if ((int)config('v2board.recaptcha_enable', 0)) {
             $recaptcha = new ReCaptcha(config('v2board.recaptcha_key'));
-            $recaptchaResp = $recaptcha->verify($request->input('recaptcha_data'));
+            $recaptchaResp = $recaptcha->verify($reqRecaptchaData);
             if (!$recaptchaResp->isSuccess()) {
                 abort(500, __('Invalid code is incorrect'));
             }
         }
+
         if ((int)config('v2board.email_whitelist_enable', 0)) {
             if (!Helper::emailSuffixVerify(
-                $request->input('email'),
+                $reqEmail,
                 config('v2board.email_whitelist_suffix', Dict::EMAIL_WHITELIST_SUFFIX_DEFAULT))
             ) {
                 abort(500, __('Email suffix is not in the Whitelist'));
             }
         }
+
         if ((int)config('v2board.email_gmail_limit_enable', 0)) {
-            $prefix = explode('@', $request->input('email'))[0];
-            if (strpos($prefix, '.') !== false || strpos($prefix, '+') !== false) {
+            $prefix = explode('@', $reqEmail)[0];
+            $suffix = explode('@', $reqEmail)[1];
+            if (strpos($prefix, '+') !== false && strtolower($suffix) === "gmail.com") {
                 abort(500, __('Gmail alias is not supported'));
             }
         }
+
         if ((int)config('v2board.stop_register', 0)) {
             abort(500, __('Registration has closed'));
         }
@@ -49,195 +69,157 @@ class AuthController extends Controller
                 abort(500, __('You must use the invitation code to register'));
             }
         }
+
         if ((int)config('v2board.email_verify', 0)) {
-            if (empty($request->input('email_code'))) {
+            if (empty($reqEmailCode)) {
                 abort(500, __('Email verification code cannot be empty'));
             }
-            if (Cache::get(CacheKey::get('EMAIL_VERIFY_CODE', $request->input('email'))) !== $request->input('email_code')) {
+            if (Cache::get(CacheKey::get(CacheKey::EMAIL_VERIFY_CODE, $reqEmail)) !== $reqEmailCode) {
                 abort(500, __('Incorrect email verification code'));
             }
         }
-        $email = $request->input('email');
-        $password = $request->input('password');
-        $exist = User::where('email', $email)->first();
-        if ($exist) {
+        $existUser = User::findByEmail($reqEmail);
+        if ($existUser) {
             abort(500, __('Email already exists'));
         }
+
         $user = new User();
-        $user->email = $email;
-        $user->password = password_hash($password, PASSWORD_DEFAULT);
-        $user->uuid = Helper::guid(true);
-        $user->token = Helper::guid();
-        if ($request->input('invite_code')) {
-            $inviteCode = InviteCode::where('code', $request->input('invite_code'))
-                ->where('status', 0)
+        $user->setAttribute(User::FIELD_EMAIL, $reqEmail);
+        $user->setAttribute(User::FIELD_PASSWORD, password_hash($reqPassword, PASSWORD_DEFAULT));
+        $user->setAttribute(User::FIELD_UUID, Helper::guid(true));
+        $user->setAttribute(User::FIELD_TOKEN, Helper::guid());
+
+        if ($reqInviteCode) {
+            $inviteCode = InviteCode::where('code', $reqInviteCode)
+                ->where(InviteCode::FIELD_STATUS, InviteCode::STATUS_UNUSED)
                 ->first();
-            if (!$inviteCode) {
+
+            /**
+             * @var InviteCode $inviteCode
+             */
+            if ($inviteCode === null) {
                 if ((int)config('v2board.invite_force', 0)) {
                     abort(500, __('Invalid invitation code'));
                 }
             } else {
-                $user->invite_user_id = $inviteCode->user_id ? $inviteCode->user_id : null;
+                $user->setAttribute(User::FIELD_INVITE_USER_ID, $inviteCode->getAttribute(InviteCode::FIELD_USER_ID) ?
+                    $inviteCode->getAttribute(InviteCode::FIELD_USER_ID) : null);
                 if (!(int)config('v2board.invite_never_expire', 0)) {
-                    $inviteCode->status = 1;
-                    $inviteCode->save();
+                    $inviteCode->setAttribute(InviteCode::FIELD_STATUS, InviteCode::STATUS_USED);
+                    if (!$inviteCode->save()) {
+                        abort(500, __('Save failed'));
+                    }
                 }
             }
         }
 
         // try out
         if ((int)config('v2board.try_out_plan_id', 0)) {
+            /**
+             * @var Plan $plan
+             */
             $plan = Plan::find(config('v2board.try_out_plan_id'));
-            if ($plan) {
-                $user->transfer_enable = $plan->transfer_enable * 1073741824;
-                $user->plan_id = $plan->id;
-                $user->group_id = $plan->group_id;
-                $user->expired_at = time() + (config('v2board.try_out_hour', 1) * 3600);
+            if ($plan !== null) {
+                $user->setAttribute(User::FIELD_PLAN_ID, $plan->getKey());
+                $configTryOutHour = (config('v2board.try_out_hour', 1) * 3600);
+                if ($configTryOutHour === 0) {
+                    $user->setAttribute(User::FIELD_EXPIRED_AT, null);
+                } else {
+                    $user->setAttribute(User::FIELD_EXPIRED_AT, time() + (config('v2board.try_out_hour', 1) * 3600));
+                }
             }
         }
+
+        $user->setAttribute(User::FIELD_REGISTER_IP, $request->getClientIp());
+        $user->setAttribute(User::FIELD_LAST_LOGIN_IP, $request->getClientIp());
+        $user->setAttribute(User::FIELD_LAST_LOGIN_AT, time());
 
         if (!$user->save()) {
             abort(500, __('Register failed'));
         }
+
         if ((int)config('v2board.email_verify', 0)) {
-            Cache::forget(CacheKey::get('EMAIL_VERIFY_CODE', $request->input('email')));
+            Cache::forget(CacheKey::get(CacheKey::EMAIL_VERIFY_CODE, $request->input('email')));
         }
 
-        $data = [
-            'token' => $user->token,
-            'auth_data' => base64_encode("{$user->email}:{$user->password}")
-        ];
-        $request->session()->put('email', $user->email);
-        $request->session()->put('id', $user->id);
+        $request->session()->put('email', $user->getAttribute(User::FIELD_EMAIL));
+        $request->session()->put('id', $user->getKey());
         return response()->json([
-            'data' => $data
+            'data' => true
         ]);
     }
 
+    /**
+     * login
+     *
+     * @param AuthLogin $request
+     * @return Application|ResponseFactory|Response
+     */
     public function login(AuthLogin $request)
     {
-        $email = $request->input('email');
-        $password = $request->input('password');
+        $reqEmail = $request->input('email');
+        $reqPassword = $request->input('password');
 
-        $user = User::where('email', $email)->first();
-        if (!$user) {
+        /**
+         * @var User $user
+         */
+        $user = User::findByEmail($reqEmail);
+        if ($user === null) {
             abort(500, __('Incorrect email or password'));
         }
+
         if (!Helper::multiPasswordVerify(
-            $user->password_algo,
-            $user->password_salt,
-            $password,
-            $user->password)
+            $user->getAttribute(User::FIELD_PASSWORD_ALGO),
+            $user->getAttribute(User::FIELD_PASSWORD_SALT),
+            $reqPassword,
+            $user->getAttribute(User::FIELD_PASSWORD))
         ) {
             abort(500, __('Incorrect email or password'));
         }
 
-        if ($user->banned) {
+        if ($user->isBanned()) {
             abort(500, __('Your account has been suspended'));
         }
 
         $data = [
-            'token' => $user->token,
-            'auth_data' => base64_encode("{$user->email}:{$user->password}")
+            'token' => $user->getAttribute(User::FIELD_TOKEN),
+            'auth_data' => base64_encode("{$user->getAttribute(User::FIELD_EMAIL)}:{$user->getAttribute(User::FIELD_PASSWORD)}")
         ];
-        $request->session()->put('email', $user->email);
-        $request->session()->put('id', $user->id);
-        if ($user->is_admin) {
+        $request->session()->put('email', $user->getAttribute(User::FIELD_EMAIL));
+        $request->session()->put('id', $user->getAttribute(User::FIELD_ID));
+        if ($user->isAdmin()) {
             $request->session()->put('is_admin', true);
             $data['is_admin'] = true;
         }
-        if ($user->is_staff) {
+        if ($user->isStaff()) {
             $request->session()->put('is_staff', true);
             $data['is_staff'] = true;
         }
+
+        $user->setAttribute(User::FIELD_LAST_LOGIN_AT, time());
+        $user->setAttribute(User::FIELD_LAST_LOGIN_IP, $request->getClientIp());
+        $user->save();
+
         return response([
             'data' => $data
         ]);
     }
 
-    public function token2Login(Request $request)
-    {
-        if ($request->input('token')) {
-            $redirect = '/#/login?verify=' . $request->input('token') . '&redirect=' . ($request->input('redirect') ? $request->input('redirect') : 'dashboard');
-            if (config('v2board.app_url')) {
-                $location = config('v2board.app_url') . $redirect;
-            } else {
-                $location = url($redirect);
-            }
-            return redirect()->to($location)->send();
-        }
 
-        if ($request->input('verify')) {
-            $key =  CacheKey::get('TEMP_TOKEN', $request->input('verify'));
-            $userId = Cache::get($key);
-            if (!$userId) {
-                abort(500, __('Token error'));
-            }
-            $user = User::find($userId);
-            if (!$user) {
-                abort(500, __('The user does not '));
-            }
-            if ($user->banned) {
-                abort(500, __('Your account has been suspended'));
-            }
-            $request->session()->put('email', $user->email);
-            $request->session()->put('id', $user->id);
-            if ($user->is_admin) {
-                $request->session()->put('is_admin', true);
-            }
-            Cache::forget($key);
-            return response([
-                'data' => true
-            ]);
-        }
-    }
-
-    public function getTempToken(Request $request)
-    {
-        $user = User::where('token', $request->input('token'))->first();
-        if (!$user) {
-            abort(500, __('Token error'));
-        }
-
-        $code = Helper::guid();
-        $key = CacheKey::get('TEMP_TOKEN', $code);
-        Cache::put($key, $user->id, 60);
-        return response([
-            'data' => $code
-        ]);
-    }
-
-    public function getQuickLoginUrl(Request $request)
-    {
-        $authData = explode(':', base64_decode($request->input('auth_data')));
-        if (!isset($authData[0])) abort(403, __('Token error'));
-        $user = User::where('email', $authData[0])
-            ->where('password', $authData[1])
-            ->first();
-        if (!$user) {
-            abort(500, __('Token error'));
-        }
-
-        $code = Helper::guid();
-        $key = CacheKey::get('TEMP_TOKEN', $code);
-        Cache::put($key, $user->id, 60);
-        $redirect = '/#/login?verify=' . $code . '&redirect=' . ($request->input('redirect') ? $request->input('redirect') : 'dashboard');
-        if (config('v2board.app_url')) {
-            $url = config('v2board.app_url') . $redirect;
-        } else {
-            $url = url($redirect);
-        }
-        return response([
-            'data' => $url
-        ]);
-    }
-
+    /**
+     * check
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     */
     public function check(Request $request)
     {
+        $sessionId = $request->session()->get('id');
+        $sessionIsAdmin = $request->session()->get('is_admin');
         $data = [
-            'is_login' => $request->session()->get('id') ? true : false
+            'is_login' => (bool)$sessionId
         ];
-        if ($request->session()->get('is_admin')) {
+        if ($sessionIsAdmin) {
             $data['is_admin'] = true;
         }
         return response([
@@ -245,22 +227,39 @@ class AuthController extends Controller
         ]);
     }
 
+    /**
+     * forget
+     *
+     * @param AuthForget $request
+     * @return Application|ResponseFactory|Response
+     */
     public function forget(AuthForget $request)
     {
-        if (Cache::get(CacheKey::get('EMAIL_VERIFY_CODE', $request->input('email'))) !== $request->input('email_code')) {
+        $reqEmail = $request->input('email');
+        $reqEmailCode = $request->input('email_code');
+        $reqPassword = $request->input('password');
+
+        if (Cache::get(CacheKey::get(CacheKey::EMAIL_VERIFY_CODE, $reqEmail)) !== $reqEmailCode) {
             abort(500, __('Incorrect email verification code'));
         }
-        $user = User::where('email', $request->input('email'))->first();
-        if (!$user) {
+
+        /**
+         * @var User $user
+         */
+        $user = User::findByEmail($reqEmail);
+        if ($user === null) {
             abort(500, __('This email is not registered in the system'));
         }
-        $user->password = password_hash($request->input('password'), PASSWORD_DEFAULT);
-        $user->password_algo = NULL;
-        $user->password_salt = NULL;
+
+        $user->setAttribute(User::FIELD_PASSWORD, password_hash($reqPassword, PASSWORD_DEFAULT));
+        $user->setAttribute(User::FIELD_PASSWORD_ALGO, null);
+        $user->setAttribute(User::FIELD_PASSWORD_SALT, null);
+
+
         if (!$user->save()) {
             abort(500, __('Reset failed'));
         }
-        Cache::forget(CacheKey::get('EMAIL_VERIFY_CODE', $request->input('email')));
+        Cache::forget(CacheKey::get(CacheKey::EMAIL_VERIFY_CODE, $reqEmail));
         return response([
             'data' => true
         ]);

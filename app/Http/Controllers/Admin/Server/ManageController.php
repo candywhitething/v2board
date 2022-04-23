@@ -2,53 +2,89 @@
 
 namespace App\Http\Controllers\Admin\Server;
 
-use App\Models\ServerV2ray;
+use App\Http\Controllers\Controller;
 use App\Models\ServerShadowsocks;
 use App\Models\ServerTrojan;
-use App\Services\ServerService;
+use App\Models\ServerVmess;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Routing\ResponseFactory;
 use Illuminate\Http\Request;
-use App\Http\Controllers\Controller;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
+use Throwable;
+
 
 class ManageController extends Controller
 {
-    public function getNodes(Request $request)
+    /**
+     * get nodes
+     *
+     * @return Application|ResponseFactory|Response
+     */
+    public function getNodes()
     {
-        $serverService = new ServerService();
+        //get shadowSocks servers
+        $shadowServers = ServerShadowsocks::nodes();
+        $vmessServers = ServerVmess::nodes();
+        $trojanServers = ServerTrojan::nodes();
+
+        $servers = array_merge(
+            $shadowServers->toArray(),
+            $vmessServers->toArray(),
+            $trojanServers->toArray()
+        );
+
+        array_multisort(array_column($servers, 'sort'), SORT_ASC, $servers);
         return response([
-            'data' => $serverService->getAllServers()
+            'data' => $servers
         ]);
     }
 
+    /**
+     * sort
+     *
+     * @param Request $request
+     * @return Application|ResponseFactory|Response
+     * @throws Throwable
+     */
     public function sort(Request $request)
     {
-        ini_set('post_max_size', '1m');
+        $reqSorts = $request->input('sorts');
         DB::beginTransaction();
-        foreach ($request->input('sorts') as $k => $v) {
-            switch ($v['key']) {
-                case 'shadowsocks':
-                    if (!ServerShadowsocks::find($v['value'])->update(['sort' => $k + 1])) {
-                        DB::rollBack();
-                        abort(500, '保存失败');
-                    }
+        foreach ($reqSorts as $index => $item) {
+            $method = $item['key'];
+            $serverID = $item['value'];
+            /**
+             * @var ServerVmess $server
+             */
+            $server = null;
+            switch ($method) {
+                case ServerShadowsocks::TYPE:
+                    $server = ServerShadowsocks::find($serverID);
                     break;
-                case 'v2ray':
-                    if (!ServerV2ray::find($v['value'])->update(['sort' => $k + 1])) {
-                        DB::rollBack();
-                        abort(500, '保存失败');
-                    }
+                case ServerVmess::TYPE:
+                    $server = ServerVmess::find($serverID);
                     break;
-                case 'trojan':
-                    if (!ServerTrojan::find($v['value'])->update(['sort' => $k + 1])) {
-                        DB::rollBack();
-                        abort(500, '保存失败');
-                    }
+                case ServerTrojan::TYPE:
+                    $server = ServerTrojan::find($serverID);
                     break;
+            }
+
+            if ($server === null) {
+                DB::rollBack();
+                abort(500, '服务器未找到');
+            }
+            $server->setAttribute(ServerVmess::FIELD_SORT, $index);
+            if (!$server->save()) {
+                DB::rollBack();
+                abort(500, '保存失败');
             }
         }
         DB::commit();
+
         return response([
             'data' => true
         ]);
     }
+
 }
