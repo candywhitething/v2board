@@ -289,7 +289,7 @@ class TicketController extends Controller
 
         $subject = $ticket->getAttribute(Ticket::FIELD_SUBJECT);
         $content = Str::limit($ticketMessage->getAttribute(TicketMessage::FIELD_MESSAGE));
-        $message = "📮工单提醒 #{$ticket->getKey()}\n———————————————\n主题：\n`{$subject}`\n内容：\n`{$content}`";
+        $message = "📮Thông báo hỗ trợ #{$ticket->getKey()}\n———————————————\nChủ đề：\n`{$subject}`\nNội dung：\n`{$content}`";
         SendTelegramJob::generateJobWithAdminMessages($message, true);
     }
 }

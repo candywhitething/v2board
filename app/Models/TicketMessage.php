@@ -30,7 +30,7 @@ use Illuminate\Database\Eloquent\Model;
 class TicketMessage extends Model
 {
     use Serialize;
-
+    
     const FIELD_ID = "id";
     const FIELD_USER_ID = "user_id";
     const FIELD_TICKET_ID = "ticket_id";

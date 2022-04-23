@@ -19,10 +19,10 @@ class Shadowrocket extends Protocol
         $download = round($user['d'] / (1024 * 1024 * 1024), 2);
         $totalTraffic = round($user['transfer_enable_value'] / (1024 * 1024 * 1024), 2);
         if ($user['expired_at'] === null) {
-            $uri .= "STATUS=🚀↑:{$upload}GB,↓:{$download}GB,TOT:{$totalTraffic}GB\r\n";
+            $uri .= "STATUS=🚀↑:{$upload}GB,↓:{$download}GB,TỔNG:{$totalTraffic}GB💡HSD:Vĩnh viễn\r\n";
         } else {
-            $expiredDate = date('Y-m-d', $user['expired_at']);
-            $uri .= "STATUS=🚀↑:{$upload}GB,↓:{$download}GB,TOT:{$totalTraffic}GB💡Expires:$expiredDate\r\n";
+            $expiredDate = date('d-m-Y', $user['expired_at']);
+            $uri .= "STATUS=🚀↑:{$upload}GB,↓:{$download}GB,TỔNG:{$totalTraffic}GB💡HSD:$expiredDate\r\n";
         }
 
         foreach ($servers as $item) {

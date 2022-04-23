@@ -87,7 +87,7 @@ class PaymentController extends Controller
     {
         //通知
         $message = sprintf(
-            "💰成功收款%s元\n———————————————\n订单号：%s\n———————————————\n用户邮箱：%s\n",
+            "💰Thanh toán thành công %s đồng\n———————————————\nMã đơn hàng： %s\n———————————————\nEmail khách hàng: %s",
             $order->getAttribute(Order::FIELD_TOTAL_AMOUNT) / 100,
             $order->getAttribute(Order::FIELD_TRADE_NO),
             $user->getAttribute(User::FIELD_EMAIL)
@@ -106,11 +106,11 @@ class PaymentController extends Controller
     private function _notifyUser(Order $order, User $user): void
     {
         $content = sprintf(
-            "✨恭喜您成功付款%s元，我们将在1-3分钟为您开通订阅。订单号:%s",
+            "✨Cảm ơn bạn đã thanh toán %s đồng, đơn hàng sẽ được kích hoạt từ 1-3 phút, Mã đơn hàng: %s",
             $order->getAttribute(Order::FIELD_TOTAL_AMOUNT) / 100,
             $order->getAttribute(Order::FIELD_TRADE_NO)
         );
-        $subject = config('v2board.app_name', 'V2Board') . "成功付款提醒";
+        $subject = config('v2board.app_name', 'V2Board') . "Thanh toán thành công";
         SendEmailJob::dispatch([
             'email' => $user->getAttribute(User::FIELD_EMAIL),
             'subject' => $subject,
@@ -127,7 +127,7 @@ class PaymentController extends Controller
             return;
         }
         $message = sprintf(
-            "✨恭喜您成功付款%s元，我们将在1-3分钟为您开通订阅。\n———————————————\n订单号：%s",
+            "✨Cảm ơn bạn đã thanh toán %s đồng，đơn hàng sẽ được kích hoạt từ 1-3 phút.\n———————————————\nMã đơn hàng：%s",
             $order->getAttribute(Order::FIELD_TOTAL_AMOUNT) / 100,
             $order->getAttribute(Order::FIELD_TRADE_NO)
         );

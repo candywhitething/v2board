@@ -73,9 +73,10 @@ class Stash extends Protocol
         }
 
         // Force the current subscription domain to be a direct rule
-        $subsDomain = $_SERVER['SERVER_NAME'];
-        $subsDomainRule = "DOMAIN,{$subsDomain},DIRECT";
-        array_unshift($config['rules'], $subsDomainRule);
+        //$subsDomain = $_SERVER['SERVER_NAME'];
+        //$subsDomainRule = "DOMAIN,{$subsDomain},DIRECT";
+        //array_unshift($config['rules'], $subsDomainRule);
+        
         $yaml = Yaml::dump($config);
         return str_replace('$app_name', config('v2board.app_name', 'V2Board'), $yaml);
     }

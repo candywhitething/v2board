@@ -23,7 +23,7 @@ class CouponController extends Controller
         $sessionID = $request->session()->get('id', 0);
         $reqCode = $request->input("code");
         $reqPlanID = $request->input("plan_id", 0);
-        $reqCycle = $request->input('cycle', '');
+        $priceId = $request->input('price_id', '');
 
         if (empty($reqCode)) {
             abort(500, __('Coupon cannot be empty'));
@@ -33,7 +33,7 @@ class CouponController extends Controller
          * @var Coupon $coupon
          */
         try {
-            $coupon = Coupon::checkCode($reqCode, $reqPlanID, $sessionID, $reqCycle);
+            $coupon = Coupon::checkCode($reqCode, $reqPlanID, $sessionID, $priceId);
         } catch (CouponException $e) {
             abort(500, $e->getMessage());
         }

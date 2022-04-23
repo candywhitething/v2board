@@ -86,6 +86,7 @@ class PaymentService
             'trade_no' => $order->getAttribute(Order::FIELD_TRADE_NO),
             'total_amount' => $order->getAttribute(Order::FIELD_TOTAL_AMOUNT),
             'user_id' => $order->getAttribute(Order::FIELD_USER_ID),
+            'order_id' => $order->getAttribute(Order::FIELD_ID),
             'stripe_token' => $stripeToken
         ]);
     }

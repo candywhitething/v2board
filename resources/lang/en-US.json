@@ -88,5 +88,6 @@
     "No permission to view": "No permission to view",
     "The coupon can only be used :limit_use_with_user per person": "The coupon can only be used :limit_use_with_user per person",
     "The coupon code cannot be used for this cycle": "The coupon code cannot be used for this period",
-    "Not eligible to purchase this subscription": "Not eligible to purchase this subscription"
+    "Not eligible to purchase this subscription":  "Not eligible to purchase this subscription"
+
 }

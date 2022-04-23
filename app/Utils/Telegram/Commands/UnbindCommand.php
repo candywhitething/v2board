@@ -15,7 +15,7 @@ class UnbindCommand extends Command
     /**
      * @var string Command Description
      */
-    protected $description = "解除绑定";
+    protected $description = "Huỷ liên kết với bot";
 
 
     /**
@@ -30,13 +30,13 @@ class UnbindCommand extends Command
         $user = User::findByTelegramId($chatId);
         if ($user === null) {
             $this->triggerCommand('help');
-            $message = '没有查询到您的用户信息，请先绑定账号';
+            $message = 'Không tìm thấy thông tin người dùng, Hãy liên kêt tài khoản của bạn.';
         } else {
             $user->setAttribute(User::FIELD_TELEGRAM_ID, 0);
             if (!$user->save()) {
-                abort(500, '解绑失败');
+                abort(500, 'Huỷ liên kết không thành công');
             }
-            $message = '解绑成功';
+            $message = 'Huỷ liên kết thành công';
         }
 
         $this->replyWithMessage(['text' => $message]);

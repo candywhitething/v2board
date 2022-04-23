@@ -125,7 +125,7 @@ class CheckServerGFW extends Command
         }
 
         if ($walledNodesTotal > 0 && $telegramBotEnable) {
-            $message = "🧱节点检查提醒：\n 现在有{$walledNodesTotal}节点处于被墙状态，请立即检查: \n" . join("\n", $walledMessages);
+            $message = "🧱Nhắc nhở kiểm tra máy chủ：\n {$walledNodesTotal} đang bị GFW quét, hãy kiểm tra ngay lập tức: \n" . join("\n", $walledMessages);
             SendTelegramJob::generateJobWithAdminMessages($message);
         }
     }

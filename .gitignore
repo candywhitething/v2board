@@ -1,6 +1,5 @@
 /node_modules
 /config/v2board.php
-/config/admin.php
 /public/hot
 /public/storage
 /public/vendor

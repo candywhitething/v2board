@@ -17,7 +17,7 @@ class SubLinkCommand extends Command
     /**
      * @var string Command Description
      */
-    protected $description = "查看订阅链接";
+    protected $description = "Xem liên kết đăng ký";
 
 
     /**
@@ -33,7 +33,7 @@ class SubLinkCommand extends Command
         if ($user === null) {
             $this->triggerCommand('help');
             $this->replyWithMessage([
-                'text' => '没有查询到您的用户信息，请先绑定账号',
+                'text' => 'Không thể kiểm tra link đăng ký, vui lòng liên kết tài khoản',
             ]);
             return;
         }
@@ -44,14 +44,14 @@ class SubLinkCommand extends Command
         $plan = Plan::find($user->getAttribute(User::FIELD_PLAN_ID));
         if ($plan === null) {
             $this->replyWithMessage([
-                'text' => '您暂无订阅',
+                'text' => 'Bạn chưa mua gói dịch vụ',
             ]);
             return;
         }
 
         $subscribe_url = Helper::getSubscribeHost() . "/api/v1/client/subscribe?token={$user['token']}";
         $this->replyWithMessage([
-            'text' => "✨我的订阅链接：\n————————————\n$subscribe_url",
+            'text' => "✨Link liên kết của bạn： \n————————————\n$subscribe_url",
             'parse_mode' => 'Markdown'
         ]);
     }

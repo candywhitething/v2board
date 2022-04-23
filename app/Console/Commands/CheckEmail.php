@@ -59,7 +59,7 @@ class CheckEmail extends Command
             $latestLogError = $latestFaultMailLog->getAttribute(MailLog::FIELD_ERROR);
             $this->_out->writeln("latest email error: " . $latestLogError);
 
-            $message = "📮邮件任务失败提醒：\n 近半小时有{$faultEmailCount}邮件发送失败，请立即检查, 错误信息:\n ```{$latestLogError}```";
+            $message = "📮Thông báo gửi email thất bại：\n Không gửi được {$faultEmailCount} email trong nửa giờ qua，vui lòng kiểm tra ngay bây giờ, thông báo lỗi:\n ```{$latestLogError}```";
             SendTelegramJob::generateJobWithAdminMessages($message);
         }
         return 0;

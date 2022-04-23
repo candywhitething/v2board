@@ -66,9 +66,9 @@ class CheckServer extends Command
         $faultNodesTotal = count($faultNodes);
         $telegramBotEnable = (bool)config('v2board.telegram_bot_enable', 0);
         if ($faultNodesTotal > 0 && $telegramBotEnable) {
-            $message = "📮节点检查提醒：\n 现在有{$faultNodesTotal}节点处于离线状态，请立即检查: \n" . join("\n", $faultNodes);
+            $message = "📮Hãy kiểm tra máy chủ：\n Máy chủ{$faultNodesTotal} không hoạt động, vui lòng kiểm tra ngay lập tức: \n". join("\n", $faultNodes);
             SendTelegramJob::generateJobWithAdminMessages($message);
         }
-        $this->_out->writeln("fault nodes total: " . $faultNodesTotal);
+        $this->_out->writeln("Tổng số máy chủ không hoạt động: " . $faultNodesTotal);
     }
 }

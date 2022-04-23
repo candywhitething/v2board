@@ -35,7 +35,7 @@ use Illuminate\Database\Eloquent\Model;
 class OrderStat extends Model
 {
     use Serialize;
-
+    
     const FIELD_ID = "id";
     const FIELD_ORDER_COUNT = "order_count";
     const FIELD_ORDER_AMOUNT = "order_amount";

@@ -33,11 +33,11 @@ use Illuminate\Database\Eloquent\Model;
 class TrafficUserLog extends Model
 {
     use Serialize;
-
+    
     const FIELD_ID = "id";
     const FIELD_U = "u";
     const FIELD_D = "d";
-    const FIELD_USER_ID = "user_id";
+    CONST FIELD_USER_ID = "user_id";
     const FIELD_LOG_AT = "log_at";
     const FIELD_LOG_DATE = 'log_date';
     const FIELD_CREATED_AT = "created_at";

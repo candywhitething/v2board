@@ -32,7 +32,7 @@ use Illuminate\Database\Eloquent\Model;
 class MailLog extends Model
 {
     use Serialize;
-
+    
     const FIELD_ID = "id";
     const FIELD_EMAIL = "email";
     const FIELD_SUBJECT = "subject";

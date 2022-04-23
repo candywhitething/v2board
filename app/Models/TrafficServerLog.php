@@ -45,7 +45,7 @@ use Illuminate\Database\Eloquent\Model;
 class TrafficServerLog extends Model
 {
     use Serialize;
-
+    
     const FIELD_ID = "id";
     const FIELD_SERVER_ID = "server_id";
     const FIELD_SERVER_TYPE = "server_type";

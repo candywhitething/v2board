@@ -92,7 +92,7 @@ return [
     |
     */
 
-    'fallback_locale' => 'vi-VN',
+    'fallback_locale' => 'zh-CN',
 
     /*
     |--------------------------------------------------------------------------
@@ -105,7 +105,7 @@ return [
     |
     */
 
-    'faker_locale' => 'vi-VN',
+    'faker_locale' => 'zh-CN',
 
     /*
     |--------------------------------------------------------------------------
@@ -235,5 +235,5 @@ return [
     | The only modification by laravel config
     |
     */
-    'version' => '1.18.4'
+    'version' => '1.18.6'
 ];

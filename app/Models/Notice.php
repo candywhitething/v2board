@@ -30,7 +30,7 @@ use Illuminate\Database\Eloquent\Model;
 class Notice extends Model
 {
     use Serialize;
-
+    
     const FIELD_ID = "id";
     const FIELD_TITLE = "title";
     const FIELD_CONTENT = "content";

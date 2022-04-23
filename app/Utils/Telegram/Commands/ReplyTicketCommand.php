@@ -20,7 +20,7 @@ class ReplyTicketCommand extends Command
     /**
      * @var string Command Description
      */
-    protected $description = "回复用户工单";
+    protected $description = "Trả lời hỗ trợ người dùng";
 
 
     /**
@@ -44,7 +44,7 @@ class ReplyTicketCommand extends Command
          */
         $user = User::where(User::FIELD_TELEGRAM_ID, $chatId)->first();
         if ($user === null) {
-            $this->replyWithMessage(["text" => '用户不存在']);
+            $this->replyWithMessage(["text" => 'Người dùng không tồn tại']);
             return;
         }
 
@@ -57,12 +57,12 @@ class ReplyTicketCommand extends Command
          */
         $ticket = Ticket::find($ticketId);
         if ($ticket == null) {
-            $this->replyWithMessage(['text' => '工单不存在']);
+            $this->replyWithMessage(['text' => 'Phiếu hỗ trợ không tồn tại']);
             return;
         }
 
         if ($ticket->isClosed()) {
-            $this->replyWithMessage(['text' => '工单已关闭，无法回复']);
+            $this->replyWithMessage(['text' => 'Phiếu hỗ trợ đã đóng và không thể trả lời']);
             return;
         }
 
@@ -75,7 +75,7 @@ class ReplyTicketCommand extends Command
 
         if (!$ticketMessage->save() || !$ticket->save()) {
             DB::rollback();
-            $this->replyWithMessage(['text' => '工单回复失败']);
+            $this->replyWithMessage(['text' => 'Trả lời hỗ trợ không thành công']);
             return;
         }
         DB::commit();
@@ -86,9 +86,9 @@ class ReplyTicketCommand extends Command
             return;
         }
         $this->replyWithMessage([
-            'text' => "#`$ticketId` 的工单已回复成功",
+            'text' => "#`$ticketId` Phiếu hỗ trợ đã được trả lời thành công",
         ]);
 
-        SendTelegramJob::generateJobWithAdminMessages("#`$ticketId` 的工单已由 $user->email 进行回复", true);
+        SendTelegramJob::generateJobWithAdminMessages("#`$ticketId` Phiếu yêu cầu hỗ trợ được tạo bởi $user->email hãy phản hồi", true);
     }
 }

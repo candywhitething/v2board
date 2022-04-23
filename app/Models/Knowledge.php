@@ -38,7 +38,7 @@ use Illuminate\Database\Eloquent\Model;
 class Knowledge extends Model
 {
     use Serialize;
-
+    
     const FIELD_ID = "id";
     const FIELD_LANGUAGE = "language";
     const FIELD_CATEGORY = "category";

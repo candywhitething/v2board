@@ -38,7 +38,7 @@ use Illuminate\Database\Eloquent\Model;
 class Payment extends Model
 {
     use Serialize;
-
+    
     const FIELD_ID = "id";
     const FIELD_UUID = "uuid";
     const FIELD_PAYMENT = "payment";

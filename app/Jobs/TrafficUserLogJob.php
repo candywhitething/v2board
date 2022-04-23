@@ -14,7 +14,7 @@ use Throwable;
 class TrafficUserLogJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
-
+    
     protected $u;
     protected $d;
     protected $userId;

@@ -16,7 +16,7 @@ use Telegram\Bot\Exceptions\TelegramSDKException;
 class SendTelegramJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
-
+    
     protected $telegramId;
     protected $text;
 

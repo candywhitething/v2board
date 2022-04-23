@@ -24,15 +24,15 @@ class ServerController extends Controller
             abort(500, __('The user does not exist'));
         }
 
-        $servers = [];
+        $servers = null;
         if ($user->isAvailable()) {
             $shadowServers = ServerShadowsocks::configs($user, true, true);
             $vmessServers = ServerVmess::configs($user, true, true);
             $trojanServers = ServerTrojan::configs($user, true, true);
-            $servers = $shadowServers->merge($vmessServers)->merge($trojanServers)->sortBy('sort');
+            $servers = $shadowServers->mergeRecursive($vmessServers)->mergeRecursive($trojanServers)->sortBy('sort');
         }
         return response([
-            'data' => $servers->values()
+            'data' => $servers ? $servers->values() : []
         ]);
     }
 

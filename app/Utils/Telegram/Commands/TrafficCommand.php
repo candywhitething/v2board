@@ -17,7 +17,7 @@ class TrafficCommand extends Command
     /**
      * @var string Command Description
      */
-    protected $description = "查询流量信息";
+    protected $description = "Xem thông tin lưu lượng sử dụng";
 
 
     /**
@@ -34,20 +34,20 @@ class TrafficCommand extends Command
 
         if ($user === null) {
             $this->triggerCommand('help');
-            $message = '没有查询到您的用户信息，请先绑定账号';
+            $message = 'Không tìm thấy thông tin người dùng của bạn, vui lòng liên kết trước khi sử dụng';
         } else {
             /**
              * @var Plan $plan
              */
             $plan = $user->plan();
             if ($plan === null || $user->isExpired()) {
-                $message = '抱歉，未能查到您的有效订阅，请登录网站查询您的账号状态';
+                $message = 'Xin lỗi, không thể tìm thấy đăng ký hợp lệ của bạn, vui lòng đăng nhập vào trang web để kiểm tra trạng thái tài khoản của bạn';
             } else {
                 $transferEnableValue = Helper::trafficConvert($plan->getAttribute(Plan::FIELD_TRANSFER_ENABLE_VALUE));
                 $up = Helper::trafficConvert($user->getAttribute(User::FIELD_U));
                 $down = Helper::trafficConvert($user->getAttribute(User::FIELD_D));
                 $remaining = Helper::trafficConvert($plan->getAttribute(Plan::FIELD_TRANSFER_ENABLE_VALUE) - ($user->getAttribute(User::FIELD_U) + $user->getAttribute(User::FIELD_D)));
-                $message = "🚥流量查询\n———————————————\n计划流量：`$transferEnableValue`\n已用上行：`$up`\n已用下行：`$down`\n剩余流量：`$remaining`";
+                $message = "🚥Lưu lượng sử dụng\n———————————————\nLưu lượng giới hạn：`$transferEnableValue`\nLưu lượng tải lên：`$up`\nLưu lượng tải xuống：`$down`\nLưu lượng còn lại：`$remaining`";
             }
         }
 

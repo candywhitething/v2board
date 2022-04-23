@@ -38,7 +38,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Ticket extends Model
 {
     use Serialize;
-
+    
     const FIELD_ID = "id";
     const FIELD_USER_ID = "user_id";
     const FIELD_LAST_REPLY_USER_ID = "last_reply_user_id";  //上次答复的用户ID

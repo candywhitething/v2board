@@ -33,7 +33,7 @@
                 header: '{{$theme_header}}',
                 color: '{{$theme_color}}',
             },
-            description: "管理后台",
+            description:"管理后台",
             version: '{{$version}}',
             background_url: '{{$background_url}}'
         }

@@ -127,7 +127,7 @@ class StatController extends Controller
                     $stats['server_name'] = $server->getAttribute(ServerVmess::FIELD_NAME);
                 }
             }
-            $stats['total'] = floatval(number_format($stats['total'] / 1073741824, 3));
+            $stats['total'] = floatval(number_format($stats['total'] / 1073741824, 3, '.', ''));
         }
         $statsData = $statistics->toArray();
         array_multisort(array_column($statsData, 'total'), SORT_DESC, $statsData);

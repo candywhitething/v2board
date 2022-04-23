@@ -14,7 +14,7 @@ class LatestURLCommand extends Command
     /**
      * @var string Command Description
      */
-    protected $description = "获取最新的网址";
+    protected $description = "Nhận thông tin mới nhất về địa chỉ truy cập";
 
 
     /**
@@ -23,8 +23,7 @@ class LatestURLCommand extends Command
     public function handle()
     {
         $text = sprintf(
-            "%s的最新网址是：%s",
-            config('v2board.app_name', 'V2Board'),
+            "URL truy cập mới nhất：%s",
             config('v2board.app_url')
         );
 

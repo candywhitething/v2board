@@ -2,9 +2,9 @@
 
 namespace App\Utils\Client\Protocols;
 
+use App\Models\ServerVmess;
 use App\Models\ServerShadowsocks;
 use App\Models\ServerTrojan;
-use App\Models\ServerVmess;
 use App\Utils\Client\Protocol;
 use File;
 use Symfony\Component\Yaml\Yaml;
@@ -26,9 +26,9 @@ class Clash extends Protocol
             $appName = config('v2board.app_name', 'V2Board');
         }
 
-        header("subscription-userinfo: upload={$user['u']}; download={$user['d']}; total={$user['transfer_enable_value']}; expire={$user['expired_at']}");
+        header("subscription-userinfo: upload={$user['u']}; download={$user['d']}; total={$user['transfer_enable']}; expire={$user['expired_at']}");
         header('profile-update-interval: 24');
-        header("content-disposition:attachment; filename={$appName}");
+        header("content-disposition: filename={$appName}");
 
         if (strpos($reqFlags, 'pro') !== false) {
             $defaultConfig = resource_path() . '/rules/default.clash.pro.yaml';
@@ -87,11 +87,13 @@ class Clash extends Protocol
         }
 
         // Force the current subscription domain to be a direct rule
-        $subsDomain = $_SERVER['SERVER_NAME'];
-        $subsDomainRule = "DOMAIN,{$subsDomain},DIRECT";
-        array_unshift($config['rules'], $subsDomainRule);
+        //$subsDomain = $_SERVER['SERVER_NAME'];
+        //$subsDomainRule = "DOMAIN,{$subsDomain},proxy";
+        //array_unshift($config['rules'], $subsDomainRule);
+        
         $yaml = Yaml::dump($config);
-        return str_replace('$app_name', config('v2board.app_name', 'V2Board'), $yaml);
+        $yaml = str_replace('$app_name', config('v2board.app_name', 'V2Board'), $yaml);
+        return $yaml;
     }
 
     public static function buildShadowsocks($password, $server): array
@@ -170,25 +172,6 @@ class Clash extends Protocol
         }
         if (!empty($server['allow_insecure'])) {
             $array['skip-cert-verify'] = (bool)$server['allow_insecure'];
-        }
-
-        if ($server['network'] === 'grpc') {
-            $array['network'] = $server['network'];
-            if (isset($server['network_settings']['serviceName'])) {
-                $array['grpc-opts'] = [];
-                $array['grpc-opts']['grpc-service-name'] = $server['network_settings']['serviceName'];
-            }
-        }
-
-        if ($server['network'] === 'ws') {
-            $array['network'] = $server['network'];
-            if (isset($server['network_settings']['path'])) {
-                $array['ws-opts'] = [];
-                $array['ws-opts'][] = $server['network_settings']['path'];
-                if (isset($server['network_settings']['headers']) && is_array($server['network_settings']['headers'])) {
-                    $array['ws-opts']['headers'] = $server['network_settings']['headers'];
-                }
-            }
         }
         return $array;
     }

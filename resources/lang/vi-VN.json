@@ -7,7 +7,7 @@
     "Currency conversion has timed out, please try again later": "Chuyển đổi tiền tệ đã hết thời gian, vui lòng thử lại sau",
     "Email already exists": "Email đã tồn tại",
     "Email suffix is not in the Whitelist": "Đuôi @email không có trong danh sách hợp lệ",
-    "Email verification code": "Mã xác minh email",
+    "Email verification code": " - Mã xác minh email",
     "Email verification code cannot be empty": "Mã xác minh email không thể để trống",
     "Email verification code has been sent, please request again later": "Mã xác minh email đã được gửi, vui lòng yêu cầu lại sau",
     "Failed to create order": "Tạo đơn hàng thất bại",
@@ -36,7 +36,7 @@
     "Save failed": "Lưu không thành công",
     "Subscription has expired or no active subscription, unable to purchase Data Reset Package": "Gói dịch vụ đã hết hạn hoặc chưa đăng ký dịch vụ, không thể mua thêm dung lượng",
     "Subscription plan does not exist": "Gói dịch vụ không tồn tại",
-    "The coupon code cannot be used for this subscription": "Mã giảm giá khổn thể dùng cho gói dịch vụ này",
+    "The coupon code cannot be used for this subscription": "Mã giảm giá không thể dùng cho gói dịch vụ này",
     "The current required minimum withdrawal commission is :limit": "Tiền hoa hồng có thể rút tối thiểu hiện tại là :limit",
     "The maximum number of creations has been reached": "Mã giới thiệu đã đạt đến số lượng tối đa có thể được tạo",
     "The old password is wrong": "Mật khẩu cũ không đúng",
@@ -83,10 +83,10 @@
     "Email can not be empty": "Email không được để trống",
     "Email format is incorrect": "Định dạng email không chính xác",
     "Password can not be empty": "Mật khẩu không được để trống",
-    "The traffic usage in :app_name has reached 80%": ":app_name thông báo lưu lượng đã đạt 80%",
+    "The traffic usage in :app_name has reached 80%": ":app_name thông báo lưu lượng đã đạt 80%", 
     "The service in :app_name is about to expire": ":app_name cảnh báo dịch vụ sắp hết hạn",
     "No permission to view": "Không có quyền để xem",
-    "The coupon can only be used :limit_use_with_user per person": "Chỉ có thể sử dụng tấm vé :limit_use_with_user per person",
-    "The coupon code cannot be used for this cycle": "Mã giảm giá không thể áp dụng cho chu kỳ thanh toán này",
-    "Not eligible to purchase this subscription": "Không đủ điều kiện để mua gói dịch vụ này"
+    "The coupon can only be used :limit_use_with_user per person": "Mã giảm giá giới hạn :limit_use_with_user lần mỗi tài khoản",
+    "Not eligible to purchase this subscription":  "Không đủ điều kiện để mua gói dịch vụ này",
+    "The coupon code cannot be used for this cycle": "Mã giảm giá không thể áp dụng cho chu kỳ thanh toán này, vui lòng chọn thời hạn đăng ký khác"
 }
